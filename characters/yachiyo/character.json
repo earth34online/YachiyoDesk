@@ -1,0 +1,166 @@
+{
+  "id": "yachiyo",
+  "displayName": "月见八千代",
+  "originalTitle": "超时空辉夜姬！月见八千代「水色の描」",
+  "creator": "水色の描",
+  "model": "model.vrm",
+  "credit": "月见八千代 / 模型制作：水色の描",
+  "motionProfile": {
+    "profileId": "yachiyo-long-garment-v1",
+    "baseStandard": "generic-vrm",
+    "capabilities": ["long-garment"],
+    "walk": {
+      "speedScale": 0.82,
+      "cadence": 4.15,
+      "strideScale": 0.56,
+      "kneeLiftScale": 0.50,
+      "hipBobScale": 0.46,
+      "armSwingScale": 0.72
+    },
+    "physics": {
+      "stepHz": 90,
+      "maxSubsteps": 4
+    },
+    "handPose": {
+      "palmFacingSign": 1
+    },
+    "legPose": {
+      "kneeBendSign": -1,
+      "seizaHipsDrop": 0.35,
+      "kneeHandReach": 0.68
+    },
+    "springBone": {
+      "enabled": true,
+      "jointNamePatterns": ["coatskirt", "_skirt"],
+      "colliderSourcePatterns": ["_skirt"],
+      "colliderTargetPatterns": ["coatskirt"],
+      "stiffnessScale": 0.58,
+      "dragForceAdd": 0.11,
+      "gravityPowerAdd": 0.025,
+      "hitRadiusScale": 1.10,
+      "copyColliderGroups": true
+    }
+  },
+  "messages": {
+    "greet": [
+      "晚上好，我是八千代。今天也一起待着吧。",
+      "我已经准备好了。想让我待在哪边？",
+      "嗯，我会安静地陪着你的。"
+    ],
+    "joy": [
+      "嘿嘿，今天心情不错。",
+      "能看见你，我也很开心。",
+      "再靠近一点也可以哦。"
+    ],
+    "surprised": [
+      "欸？发生什么了？",
+      "呀……突然碰过来会吓到我的。"
+    ],
+    "head": [
+      "嗯……摸头可以再轻一点。",
+      "头发会乱掉的，不过这次就算了。",
+      "这样有一点痒……"
+    ],
+    "body": [
+      "呀！突然怎么了？",
+      "我有在认真站好啦。"
+    ],
+    "lower": [
+      "裙摆会皱的……",
+      "不要一直戳这里啦。"
+    ],
+    "angry": [
+      "再闹的话，我真的要生气了哦。",
+      "你是不是故意的？"
+    ],
+    "sleepy": [
+      "有一点困了……我先眯一会儿。"
+    ],
+    "poke": [
+      "嗯？"
+    ],
+    "bow": [
+      "请多关照。"
+    ],
+    "stretch": [
+      "嗯——稍微活动一下。"
+    ],
+    "dance": [
+      "跟上节拍吧。"
+    ],
+    "lookAround": [
+      "今天桌面上有什么新鲜事呢？"
+    ],
+    "idleChat": [
+      "今天桌面上有什么新鲜事呢？",
+      "刚才经过的时候，好像看见了一个没关的窗口。",
+      "桌面这么宽，偶尔散散步也不错呢。",
+      "忙了这么久，要不要陪我稍微休息一下？",
+      "我会在这里陪着你的，按自己的节奏来就好。",
+      "今天最想先完成哪一件事？",
+      "如果觉得累了，就抬头看看我吧。",
+      "你的桌面比刚才热闹了一点呢。",
+      "走到这边，看到的东西好像也不一样了。",
+      "嗯……下一站要去屏幕的哪一边呢？",
+      "别担心，我没有走远，只是在附近看看。",
+      "今天也有好好努力，我都看见了哦。"
+    ],
+    "characterChat": [
+      "如果世界忽然变得很安静，我也会留在这里陪你。",
+      "我喜欢把重要的心情慢慢收好，等合适的时候再告诉你。",
+      "不必急着追上所有人。按照自己的节奏前进，也很了不起。",
+      "偶尔停下来看看远处吧，也许会发现一直忽略的小小光亮。",
+      "今天的你已经很努力了，接下来就让我安静地陪一会儿。",
+      "无论桌面多么热闹，我都会记得我们刚刚说过的话。"
+    ],
+    "nod": [
+      "嗯，我在听。"
+    ],
+    "shakeHead": [
+      "唔，不是这样。"
+    ],
+    "shy": [
+      "别、别一直看着我……"
+    ],
+    "cheer": [
+      "好耶！今天也要加油。"
+    ],
+    "think": [
+      "嗯……让我认真想一想。"
+    ],
+    "crouch": [
+      "稍微下蹲休息一会儿。"
+    ],
+    "tiptoe": [
+      "再踮高一点就看见啦。"
+    ],
+    "sway": [
+      "跟着节奏，慢慢来。"
+    ],
+    "focusComplete": [
+      "辛苦了，这一轮完成得很好。"
+    ],
+    "breakComplete": [
+      "休息结束啦，要继续吗？"
+    ]
+  },
+  "behavior": {
+    "minIntervalSeconds": 6,
+    "maxIntervalSeconds": 12,
+    "actions": [
+      { "action": "walk", "weight": 40 },
+      { "action": "lookAround", "weight": 16 },
+      { "action": "stretch", "weight": 12 },
+      { "action": "bow", "weight": 8 },
+      { "action": "dance", "weight": 8 },
+      { "action": "nod", "weight": 6 },
+      { "action": "shakeHead", "weight": 4 },
+      { "action": "shy", "weight": 6 },
+      { "action": "think", "weight": 8 },
+      { "action": "crouch", "weight": 6 },
+      { "action": "tiptoe", "weight": 6 },
+      { "action": "sway", "weight": 10 },
+      { "action": "cheer", "weight": 5 }
+    ]
+  }
+}

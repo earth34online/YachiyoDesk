@@ -1,0 +1,82 @@
+{
+  "name": "yachiyo-desk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A high-quality local desktop companion with VRM/PMX character import",
+  "author": "Excalibur",
+  "license": "MIT",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "electron:dev": "electron . --dev",
+    "build:renderer": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run test && npm run build:renderer",
+    "smoke": "npm run build:renderer && electron . --smoke-test",
+    "start": "npm run build:renderer && electron .",
+    "dist": "npm run verify && node scripts/package.cjs --win portable nsis",
+    "dist:portable": "npm run verify && node scripts/package.cjs --win portable"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "3.5.5",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/three": "^0.185.0",
+    "electron": "44.0.0",
+    "electron-builder": "26.15.3",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  },
+  "build": {
+    "appId": "local.yachiyodesk.app",
+    "productName": "YachiyoDesk",
+    "copyright": "Copyright (c) 2026 Excalibur",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "characters",
+        "to": "characters",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "converter",
+        "to": "converter",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "YachiyoDesk-${version}-${arch}-${target}.${ext}"
+    },
+    "portable": {
+      "artifactName": "YachiyoDesk-${version}-x64-Portable.exe"
+    },
+    "nsis": {
+      "artifactName": "YachiyoDesk-${version}-x64-Setup.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "YachiyoDesk",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

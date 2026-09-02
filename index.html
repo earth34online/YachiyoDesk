@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' appasset: blob: data:; img-src 'self' appasset: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' appasset: blob: data: ws://127.0.0.1:*; worker-src 'self' blob:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YachiyoDesk</title>
+  </head>
+  <body>
+    <canvas id="stage" aria-label="八千代桌面伴侣"></canvas>
+    <div id="loading" class="loading" role="status">
+      <div class="loading-card">
+        <div class="moon-mark">月</div>
+        <div class="loading-title">八千代正在醒来</div>
+        <div id="loading-detail" class="loading-detail">载入原始高清模型…</div>
+        <div class="loading-track"><div id="loading-progress"></div></div>
+      </div>
+    </div>
+    <div id="speech" class="speech" aria-live="polite"></div>
+    <div id="toast" class="toast" aria-live="polite"></div>
+    <aside id="companion-dock" class="companion-dock" aria-label="八千代快捷互动">
+      <header>
+        <span>八千代</span>
+        <small>陪伴状态</small>
+      </header>
+      <div id="dock-status" class="dock-status"></div>
+      <div id="dock-actions" class="dock-actions"></div>
+      <button id="dock-more" class="dock-more" type="button">打开完整面板</button>
+    </aside>
+    <section id="settings-panel" class="settings-panel" aria-label="YachiyoDesk 设置" hidden>
+      <header>
+        <div>
+          <div class="eyebrow">YACHIYO DESK</div>
+          <h1>桌面伴侣设置</h1>
+        </div>
+        <button id="settings-close" class="icon-button" type="button" aria-label="关闭设置">×</button>
+      </header>
+      <div id="settings-content" class="settings-content"></div>
+      <footer>
+        <button id="reset-pose" class="secondary-button" type="button">恢复姿态</button>
+        <button id="reset-window" class="secondary-button" type="button">恢复位置</button>
+      </footer>
+    </section>
+    <div id="fatal" class="fatal" hidden>
+      <strong>模型未能启动</strong>
+      <span id="fatal-message"></span>
+      <button id="fatal-retry" type="button">重新载入</button>
+    </div>
+    <section id="setup-required" class="setup-required" hidden aria-live="polite">
+      <div class="setup-card">
+        <div class="moon-mark">月</div>
+        <strong>首次启动需要本地角色</strong>
+        <p>公开版没有内置模型文件（原作者许可禁止再分发）。请导入你拥有使用权的 VRM，或选择 PMX 自动转换。</p>
+        <button id="setup-open-characters" class="primary-button" type="button">打开角色库并导入</button>
+      </div>
+    </section>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
