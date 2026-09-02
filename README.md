@@ -1,4 +1,4 @@
-# ✦ YachiyoDesk · 八千代桌面伴侣 ✦
+# ✦ YachiyoDesk ✦
 
 <div align="center">
   <img src="build/icon.png" alt="YachiyoDesk icon" width="128" height="128" />
@@ -32,21 +32,6 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 | PMX 导入 | 本机 Blender PMX/PMD → VRM | 不上传原始 PMX，转换结果只保存在本机 |
 | 画质与性能 | Ultra/High/Balanced、自适应像素倍率 | 保留模型纹理，不用低模替代高质量模型 |
 | 系统集成 | 系统托盘、桌面快捷方式、开机启动选项 | 可在设置中关闭，不强制常驻 |
-
-### 一分钟理解运行流程
-
-```mermaid
-flowchart LR
-    A[启动 YachiyoDesk] --> B{是否已有本地角色?}
-    B -- 否 --> C[显示角色导入引导]
-    C --> D[导入 VRM 或 PMX]
-    D --> E[写入 %APPDATA%/YachiyoDesk/characters]
-    B -- 是 --> F[读取 activeCharacterId]
-    E --> F
-    F --> G[加载 VRM humanoid 与 SpringBone]
-    G --> H[动作/互动/对白/自主行为]
-    H --> I[性能采样与自适应渲染]
-```
 
 ## 目录
 
