@@ -8,7 +8,7 @@
     <a href="https://github.com/earth34online/YachiyoDesk/releases"><img src="https://img.shields.io/github/v/release/earth34online/YachiyoDesk?display_name=tag&style=for-the-badge" alt="Latest release" /></a>
     <a href="https://github.com/earth34online/YachiyoDesk/releases"><img src="https://img.shields.io/github/downloads/earth34online/YachiyoDesk/total?style=for-the-badge" alt="Downloads" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/earth34online/YachiyoDesk?style=for-the-badge" alt="License" /></a>
-    <a href="https://github.com/earth34online/YachiyoDesk/actions"><img src="https://img.shields.io/badge/verification-23%20tests%20passing-8b7cff?style=for-the-badge" alt="Verification" /></a>
+    <a href="https://github.com/earth34online/YachiyoDesk/actions/workflows/verify.yml"><img src="https://github.com/earth34online/YachiyoDesk/actions/workflows/verify.yml/badge.svg" alt="Verification" /></a>
   </p>
 </div>
 
