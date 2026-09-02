@@ -2,6 +2,18 @@
 
 YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + `@pixiv/three-vrm` 渲染 VRM 角色，提供透明桌面窗口、拖动、点击互动、平滑待机/行走、动作与对白、状态面板、角色切换，以及在本机把 PMX 转换成 VRM 后导入。
 
+> 公开仓库发布的是软件代码和构建包，不包含任何受限制的角色模型。首次启动没有模型是预期行为，按下面的导入步骤即可使用。
+
+## 目录
+
+- [下载并运行](#下载并运行)
+- [首次启动与日常操作](#首次启动与日常操作)
+- [八千代模型：来源、署名和版权边界](#八千代模型来源署名和版权边界)
+- [角色优先级与兼容性](#角色优先级与兼容性)
+- [给想自己修改的开发者](#给想自己修改的开发者)
+- [诊断与安全提示](#诊断与安全提示)
+- [许可](#许可)
+
 ## 下载并运行
 
 从 [Releases](https://github.com/earth34online/YachiyoDesk/releases) 下载最新版本：
@@ -11,6 +23,17 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 - `SHA256SUMS.txt`：校验下载文件完整性。PowerShell 可运行 `Get-FileHash .\YachiyoDesk-1.0.0-x64-Portable.exe -Algorithm SHA256`。
 
 首次公开版启动时不会内置八千代模型。请点击“打开角色库并导入”，导入你有权使用的 `.vrm`，或导入 `.pmx` 让本机转换器生成 VRM；之后在角色库中点击“使用”。模型会保存在 `%APPDATA%\YachiyoDesk\characters`，下次启动会自动使用已选择的角色。软件本身默认保持 35% 显示比例、透明置顶窗口和开机启动设置，可在设置面板中调整。
+
+### 首次启动与日常操作
+
+1. 启动便携版或完成安装后启动安装版。
+2. 首次出现“需要本地角色”时，点击“打开角色库并导入”。选择 VRM，或在已配置 Blender 的情况下选择 PMX 自动转换。
+3. 在“角色库”卡片上点击“使用”。程序会重新载入角色，之后仍可从托盘菜单或设置面板切换角色。
+4. 左键按住角色可拖动窗口；点击角色会立即停止自主行走并触发对应部位互动；滚轮在角色上调整大小；右键打开动作与设置面板。
+5. 将鼠标移到角色附近可打开快捷互动栏；点击面板外部会关闭面板。无操作约 15 秒后，若开启“屏幕底部自主活动”，角色会恢复行走并穿插待机动作。
+6. 托盘图标可打开设置、角色库、数据目录、重置姿态或退出。设置中的“开机自动启动”可随时关闭，不会影响模型文件。
+
+导入角色和转换结果仅写入当前 Windows 用户的数据目录，不会自动上传到 GitHub 或其他服务器。删除角色前请确认没有需要保留的本地转换结果。
 
 ## 八千代模型：来源、署名和版权边界
 
@@ -57,6 +80,14 @@ npm run start
 
 不要把模型放进 Git。将你从原作者合法获取的 `model.vrm` 通过软件“角色库 → 导入 VRM”导入；或者使用 PMX 导入功能。开发者也可以在本地构建前将自己的模型放到 `characters/yachiyo/model.vrm`，但该文件会被 `.gitignore` 忽略，且不得提交或发布。公开构建故意不包含模型，首次运行的引导页就是预期行为。
 
+PMX 转换器默认搜索常见的 Blender 4.x 安装位置，也可以显式设置：
+
+```powershell
+$env:YACHIYO_BLENDER_PATH = 'C:\Program Files\Blender Foundation\Blender 4.5\blender.exe'
+```
+
+转换时请把 PMX、同目录的纹理、`.pmd/.sph/.spa` 等依赖文件保留在原目录；转换完成后只将生成的 VRM 复制到应用数据目录，原始 PMX 不会被仓库收集。
+
 ### 构建发布包
 
 ```powershell
@@ -74,6 +105,16 @@ npm run dist            # 便携版 + NSIS 安装版
 - `src/ProceduralAnimator.ts`：通用人体动作、走路步态、手掌/肘部约束和角色动作。
 - `src/AppUI.ts`、`src/InteractionController.ts`：设置面板、角色管理、拖动和鼠标互动。
 - `characters/yachiyo/character.json`：八千代行为和动作配置；模型文件刻意不在仓库中。
+
+### 提交前自检
+
+```powershell
+npm run verify
+git diff --check
+git ls-files | Select-String '\.(vrm|pmx|pmd|zip|7z|rar)$'
+```
+
+最后一条命令应无输出。发布构建时还应检查 `release/` 只作为 Release asset 使用，不要 `git add` 进普通提交。
 
 ## 诊断与安全提示
 
