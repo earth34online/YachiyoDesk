@@ -20,6 +20,15 @@ Get-FileHash .\YachiyoDesk-1.0.0-x64-Setup.exe -Algorithm SHA256
 
 将输出与 Release 中的 `SHA256SUMS.txt` 对比。GitHub 的 `/releases/latest/download/...` 链接会始终指向最新正式 Release，适合脚本或收藏使用。
 
+当前 `v1.0.0` 的校验值如下（后续版本以对应 Release 的文件为准）：
+
+```text
+Portable  6BA7ED7B9FB46B1A03B781D70E024670C273943B87DE67A204E45A3F4D1AE198
+Setup     199748D1B4DE4099A1E5D358370A234200CB7EB4A868D6E73738859241204F66
+```
+
+如果 PowerShell 命令输出不同，不要运行该文件；重新从 Release 下载，或检查下载是否被代理、杀毒软件或浏览器中断。
+
 ## 2. 首次启动
 
 公开版不含模型是有意设计：八千代模型许可禁止再分发，软件必须让使用者自己从原作者页面获取。首次启动会看到“首次启动需要本地角色”卡片：

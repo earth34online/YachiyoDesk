@@ -57,11 +57,45 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 ## 下载并运行
 
-从 [Releases](https://github.com/earth34online/YachiyoDesk/releases) 下载最新版本：
+### 方案 A：浏览器下载（推荐）
+
+打开 [Releases](https://github.com/earth34online/YachiyoDesk/releases/latest)，在 **Assets** 区域选择一个版本：
 
 - [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.0-x64-Portable.exe)：下载后直接运行，不写入安装目录。
 - [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.0-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
-- `SHA256SUMS.txt`：校验下载文件完整性。PowerShell 可运行 `Get-FileHash .\YachiyoDesk-1.0.0-x64-Portable.exe -Algorithm SHA256`。
+- [`SHA256SUMS.txt`](https://github.com/earth34online/YachiyoDesk/releases/latest/download/SHA256SUMS.txt)：校验下载文件完整性。
+
+下载后的操作顺序：
+
+1. 如果你只想解压即用，双击 Portable；如果希望有卸载入口和快捷方式，运行 Setup。
+2. Windows SmartScreen 如果提示“未知发布者”，请先确认文件来自本仓库 Release，并核对 SHA-256 后再选择“仍要运行”。公开包没有代码签名证书，SmartScreen 警告属于预期现象。
+3. 第一次启动会先出现角色导入引导，不会直接显示八千代；这是因为模型文件不能随包再分发。
+
+### 方案 B：PowerShell 下载并校验
+
+下面的命令会把最新正式 Release 下载到当前用户的 Downloads 目录：
+
+```powershell
+$dir = Join-Path $env:USERPROFILE 'Downloads\YachiyoDesk'
+New-Item -ItemType Directory -Path $dir -Force | Out-Null
+$base = 'https://github.com/earth34online/YachiyoDesk/releases/latest/download'
+Invoke-WebRequest "$base/YachiyoDesk-1.0.0-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.0-x64-Portable.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.0-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.0-x64-Setup.exe')
+Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $dir 'SHA256SUMS.txt')
+Set-Location $dir
+Get-FileHash .\YachiyoDesk-1.0.0-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.0-x64-Setup.exe -Algorithm SHA256
+```
+
+确认哈希与 `SHA256SUMS.txt` 一致后运行其一：
+
+```powershell
+Start-Process .\YachiyoDesk-1.0.0-x64-Portable.exe
+# 或者
+Start-Process .\YachiyoDesk-1.0.0-x64-Setup.exe
+```
+
+Release asset 使用 `/releases/latest/download/<文件名>` 固定链接，更新版本后无需修改下载地址。
 
 首次公开版启动时不会内置八千代模型。请点击“打开角色库并导入”，导入你有权使用的 `.vrm`，或导入 `.pmx` 让本机转换器生成 VRM；之后在角色库中点击“使用”。模型会保存在 `%APPDATA%\YachiyoDesk\characters`，下次启动会自动使用已选择的角色。软件本身默认保持 35% 显示比例、透明置顶窗口和开机启动设置，可在设置面板中调整。
 
@@ -107,6 +141,15 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 ### 获取源码并运行
 
+先确认 Node.js 和 npm 可用：
+
+```powershell
+node --version   # 推荐 Node.js 20 或 22 LTS
+npm --version
+```
+
+然后执行完整的首次构建：
+
 ```powershell
 git clone https://github.com/earth34online/YachiyoDesk.git
 cd YachiyoDesk
@@ -115,7 +158,28 @@ npm run verify
 npm run start
 ```
 
-`npm run verify` 会执行 TypeScript 类型检查、Vitest 单元测试和 Vite 渲染器构建。开发调试可使用 `npm run electron:dev`（先另开终端运行 `npm run dev`）。
+每条命令的作用如下：
+
+| 命令 | 作用 |
+| --- | --- |
+| `npm ci` | 按 `package-lock.json` 安装精确版本依赖；首次运行和 CI 使用它 |
+| `npm run typecheck` | 只执行 TypeScript 类型检查 |
+| `npm test` | 执行 Vitest 单元测试 |
+| `npm run build:renderer` | 构建 Vite renderer 到 `dist/` |
+| `npm run verify` | 依次执行类型检查、测试和 renderer 构建 |
+| `npm run start` | 先构建 renderer，再启动 Electron 应用 |
+
+开发调试需要两个终端：
+
+```powershell
+# 终端 1：启动 Vite 开发服务器
+npm run dev
+
+# 终端 2：启动 Electron（读取开发服务器）
+npm run electron:dev
+```
+
+关闭开发服务器后，生产构建仍然使用 `npm run start`。开发模式不会自动把模型复制进仓库；仍应通过角色库导入本地模型。
 
 ### 本地准备八千代或其他角色
 
@@ -132,11 +196,28 @@ $env:YACHIYO_BLENDER_PATH = 'C:\Program Files\Blender Foundation\Blender 4.5\ble
 ### 构建发布包
 
 ```powershell
-npm run dist:portable   # 便携版
-npm run dist            # 便携版 + NSIS 安装版
+npm run dist:portable   # 只生成 Windows x64 便携版
+npm run dist            # 生成 Windows x64 便携版 + NSIS 安装版
 ```
 
-构建产物在 `release/`。发布前请确认 `git ls-files` 中不存在 `.vrm/.pmx/.zip`、纹理、`node_modules`、`release` 或本地工具目录；大于 100 MiB 的安装包应作为 GitHub Release asset 上传，而不是普通 Git blob。发布说明应再次写明模型不随包分发、原作者来源和许可边界。
+构建产物在 `release/`：
+
+```text
+release/
+  YachiyoDesk-<version>-x64-Portable.exe
+  YachiyoDesk-<version>-x64-Setup.exe
+```
+
+发布前建议按下面顺序操作：
+
+```powershell
+npm run verify
+git diff --check
+git ls-files | Select-String '\.(vrm|pmx|pmd|zip|7z|rar)$'
+Get-ChildItem .\release -File | Get-FileHash -Algorithm SHA256
+```
+
+第一条命令和第二条命令必须成功；第三条命令应无输出。大型安装包应作为 GitHub Release asset 上传，而不是普通 Git blob；这是 GitHub 针对大型二进制文件的正常发布方式。[GitHub Release 文档](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
 
 ### 代码结构
 
