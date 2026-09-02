@@ -1,8 +1,52 @@
-# YachiyoDesk
+# ✦ YachiyoDesk · 八千代桌面伴侣 ✦
+
+<div align="center">
+  <img src="build/icon.png" alt="YachiyoDesk icon" width="128" height="128" />
+  <p><strong>让一个高质量 VRM 角色住在你的桌面上</strong></p>
+  <p>透明窗口 · 自主行走 · 自然动作 · VRM 导入 · PMX 本机转换 · 本地优先</p>
+  <p>
+    <a href="https://github.com/earth34online/YachiyoDesk/releases"><img src="https://img.shields.io/github/v/release/earth34online/YachiyoDesk?display_name=tag&style=for-the-badge" alt="Latest release" /></a>
+    <a href="https://github.com/earth34online/YachiyoDesk/releases"><img src="https://img.shields.io/github/downloads/earth34online/YachiyoDesk/total?style=for-the-badge" alt="Downloads" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/earth34online/YachiyoDesk?style=for-the-badge" alt="License" /></a>
+    <a href="https://github.com/earth34online/YachiyoDesk/actions"><img src="https://img.shields.io/badge/verification-23%20tests%20passing-8b7cff?style=for-the-badge" alt="Verification" /></a>
+  </p>
+</div>
+
+> **公开版说明**：仓库和 Release 发布的是软件代码与 Windows 构建包，不包含受限制的角色模型。首次启动没有模型是预期行为，请按照 [首次启动与日常操作](#首次启动与日常操作) 导入你有权使用的角色。
 
 YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + `@pixiv/three-vrm` 渲染 VRM 角色，提供透明桌面窗口、拖动、点击互动、平滑待机/行走、动作与对白、状态面板、角色切换，以及在本机把 PMX 转换成 VRM 后导入。
 
-> 公开仓库发布的是软件代码和构建包，不包含任何受限制的角色模型。首次启动没有模型是预期行为，按下面的导入步骤即可使用。
+> 你可以把它当作一个可扩展的本地角色运行时：模型属于你自己，程序负责加载、动作、交互、窗口和配置。
+
+## ✨ 功能一览
+
+| 模块 | 能力 | 说明 |
+| --- | --- | --- |
+| 桌面窗口 | 透明、无边框、置顶、边缘限制 | 不遮挡桌面，支持拖动和位置记忆 |
+| 自主行为 | 底部行走、巡逻/随机方向、动作插播 | 无操作约 15 秒后恢复活动 |
+| 人体动作 | 待机、走路、挥手、鞠躬、伸展、跳舞、思考、下蹲等 | 通用 VRM humanoid 骨骼映射，缺失骨骼时安全降级 |
+| 互动系统 | 摸头、身体互动、拖动、右键面板、快捷互动栏 | 点击人物会立即中断自主行走 |
+| 对白系统 | 角色对白、状态对白、随机闲聊 | 内容来自角色 manifest，可按角色替换 |
+| 宠物状态 | 饱腹、精力、心情、亲密度 | 本地持久化，不联网上传 |
+| 角色库 | 多角色、VRM 导入、角色切换、删除 | 角色存放于用户数据目录 |
+| PMX 导入 | 本机 Blender PMX/PMD → VRM | 不上传原始 PMX，转换结果只保存在本机 |
+| 画质与性能 | Ultra/High/Balanced、自适应像素倍率 | 保留模型纹理，不用低模替代高质量模型 |
+| 系统集成 | 系统托盘、桌面快捷方式、开机启动选项 | 可在设置中关闭，不强制常驻 |
+
+### 一分钟理解运行流程
+
+```mermaid
+flowchart LR
+    A[启动 YachiyoDesk] --> B{是否已有本地角色?}
+    B -- 否 --> C[显示角色导入引导]
+    C --> D[导入 VRM 或 PMX]
+    D --> E[写入 %APPDATA%/YachiyoDesk/characters]
+    B -- 是 --> F[读取 activeCharacterId]
+    E --> F
+    F --> G[加载 VRM humanoid 与 SpringBone]
+    G --> H[动作/互动/对白/自主行为]
+    H --> I[性能采样与自适应渲染]
+```
 
 ## 目录
 
@@ -11,8 +55,20 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 - [八千代模型：来源、署名和版权边界](#八千代模型来源署名和版权边界)
 - [角色优先级与兼容性](#角色优先级与兼容性)
 - [给想自己修改的开发者](#给想自己修改的开发者)
+- [更多文档](#更多文档)
 - [诊断与安全提示](#诊断与安全提示)
 - [许可](#许可)
+
+## 🔗 更多文档
+
+| 文档 | 用途 |
+| --- | --- |
+| [安装与角色导入指南](docs/INSTALLATION.md) | 从下载校验到 VRM/PMX 导入、Blender 配置、迁移和常见问题 |
+| [架构与扩展点](docs/ARCHITECTURE.md) | 了解主进程、renderer、动作系统、manifest 和通用角色标准 |
+| [变更记录](CHANGELOG.md) | 查看版本功能、版权策略和后续方向 |
+| [安全与隐私](SECURITY.md) | 报告路径穿越、远程执行、资产泄露等安全问题 |
+
+如果你只想使用程序，阅读“下载并运行”和[安装与角色导入指南](docs/INSTALLATION.md)即可；如果你想改动作、增加角色或调整 PMX 映射，再阅读[架构与扩展点](docs/ARCHITECTURE.md)。
 
 ## 下载并运行
 
