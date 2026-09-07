@@ -103,6 +103,9 @@ const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }
     ui.showSpeech(payload);
   } else if (command === 'autonomy' && payload && typeof payload === 'object') {
     runtime.setAutonomy(payload as AutonomyCommand);
+  } else if (command === 'dismiss-inactive-ui') {
+    ui.hideSettings();
+    interaction.reevaluateClickThrough();
   } else if (command === 'test-drag' && bootstrap.smokeTest) {
     runtime.setDragging(Boolean(payload));
   } else if (command === 'test-hide-overlays' && bootstrap.smokeTest) {

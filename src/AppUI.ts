@@ -102,6 +102,8 @@ export class AppUI {
   private toastTimer = 0;
   private dockHideTimer = 0;
   private settingsHideTimer = 0;
+  private settingsShowFrame = 0;
+  private settingsOpen = false;
 
   constructor(settings: AppSettings, character: CharacterManifest, callbacks: UiCallbacks) {
     this.settings = settings;
@@ -111,8 +113,13 @@ export class AppUI {
     document.querySelector('#reset-pose')?.addEventListener('click', callbacks.onResetPose);
     document.querySelector('#reset-window')?.addEventListener('click', callbacks.onResetWindow);
     document.querySelector('#fatal-retry')?.addEventListener('click', () => window.location.reload());
-    this.settingsPanel.addEventListener('pointerdown', (event) => event.stopPropagation());
+    this.settingsPanel.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+      window.yachiyoDesk.noteUserActivity();
+    });
     this.settingsPanel.addEventListener('pointermove', (event) => event.stopPropagation());
+    this.settingsPanel.addEventListener('keydown', () => window.yachiyoDesk.noteUserActivity());
+    this.settingsPanel.addEventListener('input', () => window.yachiyoDesk.noteUserActivity());
     this.renderCompanionDock();
     this.companionDock.addEventListener('pointerenter', () => {
       window.clearTimeout(this.dockHideTimer);
@@ -182,18 +189,29 @@ export class AppUI {
   showSettings(page: SettingsPage = this.activePage): void {
     window.clearTimeout(this.settingsHideTimer);
     this.settingsHideTimer = 0;
+    cancelAnimationFrame(this.settingsShowFrame);
+    this.settingsShowFrame = 0;
+    this.settingsOpen = true;
     this.activePage = page;
     this.renderSettings();
     this.settingsPanel.hidden = false;
     document.body.classList.add('settings-open');
-    requestAnimationFrame(() => this.settingsPanel.classList.add('is-visible'));
+    this.settingsShowFrame = requestAnimationFrame(() => {
+      this.settingsShowFrame = 0;
+      // An outside press can close the panel between showSettings() and this
+      // frame. Never let that stale frame make a logically closed panel visible.
+      if (this.settingsOpen) this.settingsPanel.classList.add('is-visible');
+    });
     window.yachiyoDesk.setClickThrough(false);
     window.yachiyoDesk.setInteractionPanelOpen(true);
     if (page === 'characters') void this.refreshCharacters();
   }
 
   hideSettings(): void {
-    if (this.settingsPanel.hidden) return;
+    if (!this.settingsOpen) return;
+    this.settingsOpen = false;
+    cancelAnimationFrame(this.settingsShowFrame);
+    this.settingsShowFrame = 0;
     this.settingsPanel.classList.remove('is-visible');
     document.body.classList.remove('settings-open');
     window.clearTimeout(this.settingsHideTimer);
@@ -202,7 +220,6 @@ export class AppUI {
       // guard, the stale close transition can hide a newly opened panel.
       if (!this.settingsPanel.classList.contains('is-visible')) {
         this.settingsPanel.hidden = true;
-        this.callbacks.onCloseSettings();
       }
       this.settingsHideTimer = 0;
     }, 180);
@@ -211,7 +228,7 @@ export class AppUI {
   }
 
   isSettingsOpen(): boolean {
-    return !this.settingsPanel.hidden;
+    return this.settingsOpen;
   }
 
   isCompanionDockTarget(target: EventTarget | null): boolean {

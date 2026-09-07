@@ -136,6 +136,7 @@ export type AppCommand =
   | 'autonomous-reaction'
   | 'speech'
   | 'autonomy'
+  | 'dismiss-inactive-ui'
   | 'focus-complete'
   | 'test-drag'
   | 'test-hide-overlays';

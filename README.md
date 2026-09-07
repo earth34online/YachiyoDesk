@@ -23,7 +23,7 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 | 模块 | 能力 | 说明 |
 | --- | --- | --- |
 | 桌面窗口 | 透明、无边框、置顶、边缘限制 | 不遮挡桌面，支持拖动和位置记忆 |
-| 自主行为 | 底部行走、巡逻/随机方向、动作插播 | 无操作约 15 秒后恢复活动 |
+| 自主行为 | 底部行走、巡逻/随机方向、动作插播 | UI 连续 15 秒无操作会自动收起并恢复活动 |
 | 人体动作 | 待机、走路、挥手、鞠躬、伸展、跳舞、思考、下蹲等 | 通用 VRM humanoid 骨骼映射，缺失骨骼时安全降级 |
 | 互动系统 | 摸头、身体互动、拖动、右键面板、快捷互动栏 | 点击人物会立即中断自主行走 |
 | 对白系统 | 角色对白、状态对白、随机闲聊 | 内容来自角色 manifest，可按角色替换 |
@@ -50,6 +50,7 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 | --- | --- |
 | [安装与角色导入指南](docs/INSTALLATION.md) | 从下载校验到 VRM/PMX 导入、Blender 配置、迁移和常见问题 |
 | [架构与扩展点](docs/ARCHITECTURE.md) | 了解主进程、renderer、动作系统、manifest 和通用角色标准 |
+| [需求与验收清单](docs/REQUIREMENTS.md) | 历次产品要求、当前实现位置与明确兼容边界 |
 | [变更记录](CHANGELOG.md) | 查看版本功能、版权策略和后续方向 |
 | [安全与隐私](SECURITY.md) | 报告路径穿越、远程执行、资产泄露等安全问题 |
 
@@ -61,8 +62,8 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 打开 [Releases](https://github.com/earth34online/YachiyoDesk/releases/latest)，在 **Assets** 区域选择一个版本：
 
-- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.0-x64-Portable.exe)：下载后直接运行，不写入安装目录。
-- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.0-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
+- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.1-x64-Portable.exe)：下载后直接运行，不写入安装目录。
+- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.1-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
 - [`SHA256SUMS.txt`](https://github.com/earth34online/YachiyoDesk/releases/latest/download/SHA256SUMS.txt)：校验下载文件完整性。
 
 下载后的操作顺序：
@@ -79,20 +80,20 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 $dir = Join-Path $env:USERPROFILE 'Downloads\YachiyoDesk'
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
 $base = 'https://github.com/earth34online/YachiyoDesk/releases/latest/download'
-Invoke-WebRequest "$base/YachiyoDesk-1.0.0-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.0-x64-Portable.exe')
-Invoke-WebRequest "$base/YachiyoDesk-1.0.0-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.0-x64-Setup.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.1-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.1-x64-Portable.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.1-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.1-x64-Setup.exe')
 Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $dir 'SHA256SUMS.txt')
 Set-Location $dir
-Get-FileHash .\YachiyoDesk-1.0.0-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.0-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.1-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.1-x64-Setup.exe -Algorithm SHA256
 ```
 
 确认哈希与 `SHA256SUMS.txt` 一致后运行其一：
 
 ```powershell
-Start-Process .\YachiyoDesk-1.0.0-x64-Portable.exe
+Start-Process .\YachiyoDesk-1.0.1-x64-Portable.exe
 # 或者
-Start-Process .\YachiyoDesk-1.0.0-x64-Setup.exe
+Start-Process .\YachiyoDesk-1.0.1-x64-Setup.exe
 ```
 
 Release asset 使用 `/releases/latest/download/<文件名>` 固定链接，更新版本后无需修改下载地址。
@@ -105,7 +106,7 @@ Release asset 使用 `/releases/latest/download/<文件名>` 固定链接，更�
 2. 首次出现“需要本地角色”时，点击“打开角色库并导入”。选择 VRM，或在已配置 Blender 的情况下选择 PMX 自动转换。
 3. 在“角色库”卡片上点击“使用”。程序会重新载入角色，之后仍可从托盘菜单或设置面板切换角色。
 4. 左键按住角色可拖动窗口；点击角色会立即停止自主行走并触发对应部位互动；滚轮在角色上调整大小；右键打开动作与设置面板。
-5. 将鼠标移到角色附近可打开快捷互动栏；点击面板外部会关闭面板。无操作约 15 秒后，若开启“屏幕底部自主活动”，角色会恢复行走并穿插待机动作。
+5. 将鼠标移到角色附近可打开快捷互动栏；点击面板外部会关闭面板。主动关闭 UI 后连续 15 秒无交互会恢复行走；即使 UI 保持打开，只要连续 15 秒没有按键、点击或表单输入，也会自动收起并立即恢复活动。
 6. 托盘图标可打开设置、角色库、数据目录、重置姿态或退出。设置中的“开机自动启动”可随时关闭，不会影响模型文件。
 
 导入角色和转换结果仅写入当前 Windows 用户的数据目录，不会自动上传到 GitHub 或其他服务器。删除角色前请确认没有需要保留的本地转换结果。

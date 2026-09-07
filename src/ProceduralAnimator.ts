@@ -1,5 +1,6 @@
 import type { VRM } from '@pixiv/three-vrm';
 import * as THREE from 'three';
+import { viewerFacingPalmTwists } from './handPose';
 import { ExpressionController } from './ExpressionController';
 import { clamp, damp, randomBetween, reactionEnvelope, smoothstep01 } from './math';
 import type { AppSettings, AutonomousMotion, MotionProfile, ReactionName } from './types';
@@ -518,7 +519,8 @@ export class ProceduralAnimator {
       // Twist only the wrist around the forearm axis so the palm, rather than
       // its edge, faces the viewer. The approved shoulder/elbow chain stays
       // exactly as tuned above.
-      rightHandX = THREE.MathUtils.lerp(rightHandX, 0.92 * palmSign, weight);
+      const palm = viewerFacingPalmTwists(palmSign, 0.92);
+      rightHandX = THREE.MathUtils.lerp(rightHandX, palm.right, weight);
       rightHandY += wave * 0.12 * weight;
       rightHandZ += wave * 0.055 * weight;
       // Open the waving hand while retaining a relaxed thumb; a flat rigid
@@ -540,8 +542,9 @@ export class ProceduralAnimator {
       rightArmZ = THREE.MathUtils.lerp(rightArmZ, -0.76, weight);
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.24, weight);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.24, weight);
-      leftHandX = THREE.MathUtils.lerp(leftHandX, -0.24 * palmSign, lift);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, 0.24 * palmSign, lift);
+      const palms = viewerFacingPalmTwists(palmSign, 0.64);
+      leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, lift);
+      rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, lift);
       leftFingerCurl = THREE.MathUtils.lerp(leftFingerCurl, 0.065 * fingerCurlScale, lift);
       rightFingerCurl = THREE.MathUtils.lerp(rightFingerCurl, 0.065 * fingerCurlScale, lift);
       leftKneeX += 0.025 * lift;
@@ -559,8 +562,9 @@ export class ProceduralAnimator {
       rightArmZ = THREE.MathUtils.lerp(rightArmZ, -0.88, weight);
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.34, weight);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.34, weight);
-      leftHandX = THREE.MathUtils.lerp(leftHandX, -0.32 * palmSign, recoil);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, 0.32 * palmSign, recoil);
+      const palms = viewerFacingPalmTwists(palmSign, 0.86);
+      leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, recoil);
+      rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, recoil);
     } else if (reaction === 'angry') {
       const disapproval = Math.sin(reactionElapsed * 3.2) * 0.018 * weight;
       hipsX += 0.011 * weight;
@@ -629,8 +633,9 @@ export class ProceduralAnimator {
       rightArmZ = THREE.MathUtils.lerp(rightArmZ, 0.52 + sway * 0.35, stretch);
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.22, stretch);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.22, stretch);
-      leftHandX = THREE.MathUtils.lerp(leftHandX, -0.36 * palmSign, stretch);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, 0.36 * palmSign, stretch);
+      const palms = viewerFacingPalmTwists(palmSign, 0.88);
+      leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, stretch);
+      rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, stretch);
     } else if (reaction === 'dance') {
       const dance = windowPulse(progress, 0.02, 0.11, 0.87, 0.99) * weight;
       const beat = Math.sin(reactionElapsed * Math.PI * 1.7);
@@ -705,8 +710,9 @@ export class ProceduralAnimator {
       // elbows away from the body and produced the visible inverted joints.
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.32, active);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.32, active);
-      leftHandX = THREE.MathUtils.lerp(leftHandX, -0.44 * palmSign, active);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, 0.44 * palmSign, active);
+      const palms = viewerFacingPalmTwists(palmSign, 0.92);
+      leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, active);
+      rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, active);
       leftFingerCurl = THREE.MathUtils.lerp(leftFingerCurl, 0.055 * fingerCurlScale, active);
       rightFingerCurl = THREE.MathUtils.lerp(rightFingerCurl, 0.055 * fingerCurlScale, active);
       leftKneeX += (0.10 + Math.max(0, -beat) * 0.30) * active;

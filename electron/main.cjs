@@ -765,13 +765,13 @@ function stopAutonomousMovement(persist = true, faceViewer = false) {
   }
 }
 
-function scheduleAutonomy(delayMs) {
+function scheduleAutonomy(delayMs, allowWhilePanelOpen = false) {
   clearTimeout(autonomyTimer);
   autonomyTimer = null;
   if ((IS_AUTOMATED_TEST && !IS_INTERACTION_TEST) || !runtimeIsReady || !settingsStore) return;
   const settings = settingsStore.get();
   if (!settings.autonomousBehavior || settings.lockPosition) return;
-  if (interactionPanelOpen) return;
+  if (interactionPanelOpen && !allowWhilePanelOpen) return;
   autonomyTimer = setTimeout(runAutonomousBehavior, Math.max(120, delayMs ?? 450));
 }
 
@@ -783,16 +783,26 @@ function noteUserActivity() {
   // send an idle command even if a timer, rather than a walk, was active so the
   // avatar starts damping back toward the viewer in this same interaction.
   stopAutonomousMovement(true, true);
-  if (!interactionPanelOpen) scheduleAutonomy(USER_INACTIVITY_RESUME_MS);
+  // Keep a watchdog alive while a panel is open. Otherwise one missed close
+  // event leaves interactionPanelOpen=true forever and autonomy cannot recover.
+  // Actual UI activity keeps pushing this deadline forward.
+  scheduleAutonomy(USER_INACTIVITY_RESUME_MS, interactionPanelOpen);
 }
 
 function setInteractionPanelOpen(open) {
-  interactionPanelOpen = Boolean(open);
+  const nextOpen = Boolean(open);
+  if (nextOpen === interactionPanelOpen) {
+    // Reopening an already visible panel is activity. A duplicate close must
+    // not interrupt a walk that has just resumed after the inactivity timeout.
+    if (nextOpen) noteUserActivity();
+    return;
+  }
+  interactionPanelOpen = nextOpen;
   lastUserActivityAt = Date.now();
   clearTimeout(autonomyTimer);
   autonomyTimer = null;
   stopAutonomousMovement(true, true);
-  if (!interactionPanelOpen) scheduleAutonomy(USER_INACTIVITY_RESUME_MS);
+  scheduleAutonomy(USER_INACTIVITY_RESUME_MS, interactionPanelOpen);
 }
 
 function startAutonomousWalk() {
@@ -956,15 +966,24 @@ function runAutonomousInterlude() {
 function runAutonomousBehavior() {
   autonomyTimer = null;
   if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || windowDrag) {
-    scheduleAutonomy(1200);
+    scheduleAutonomy(1200, interactionPanelOpen);
     return;
   }
   const settings = settingsStore.get();
-  if (!settings.autonomousBehavior || settings.lockPosition || interactionPanelOpen) return;
+  if (!settings.autonomousBehavior || settings.lockPosition) return;
   const inactiveFor = Date.now() - lastUserActivityAt;
   if (lastUserActivityAt > 0 && inactiveFor < USER_INACTIVITY_RESUME_MS) {
-    scheduleAutonomy(USER_INACTIVITY_RESUME_MS - inactiveFor);
+    scheduleAutonomy(USER_INACTIVITY_RESUME_MS - inactiveFor, interactionPanelOpen);
     return;
+  }
+  if (interactionPanelOpen) {
+    // Fifteen seconds without panel activity means the user has finished with
+    // the UI. Dismiss it and resume now instead of starting a second cooldown.
+    interactionPanelOpen = false;
+    sendCommand('dismiss-inactive-ui', true);
+    log('INFO', 'Inactive interaction panel dismissed; resuming autonomy', {
+      inactiveForMs: inactiveFor,
+    });
   }
   if (!startAutonomousWalk()) scheduleAutonomy(1200);
 }
@@ -1558,6 +1577,38 @@ function bindIpc() {
         true,
       );
 
+      // Reproduce the intermittent open/close race: close immediately after
+      // opening, before the next animation frame can add is-visible. Repeat it
+      // so a stale requestAnimationFrame cannot occasionally resurrect the UI.
+      let rapidOutsideClosePassed = true;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        sendCommand('show-settings');
+        await new Promise((resolve) => setTimeout(resolve, 3));
+        await mainWindow.webContents.executeJavaScript(
+          `document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 2, clientY: 2 }))`,
+          true,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 210));
+        const state = await mainWindow.webContents.executeJavaScript(
+          `({ hidden: document.querySelector('#settings-panel')?.hidden === true,
+              visibleClass: document.querySelector('#settings-panel')?.classList.contains('is-visible') === true,
+              bodyClass: document.body.classList.contains('settings-open') })`,
+          true,
+        );
+        rapidOutsideClosePassed = rapidOutsideClosePassed
+          && Boolean(state?.hidden) && !Boolean(state?.visibleClass) && !Boolean(state?.bodyClass);
+      }
+
+      sendCommand('show-settings');
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      await mainWindow.webContents.executeJavaScript(`window.dispatchEvent(new Event('blur'))`, true);
+      await new Promise((resolve) => setTimeout(resolve, 210));
+      const blurClosed = await mainWindow.webContents.executeJavaScript(
+        `document.querySelector('#settings-panel')?.hidden === true
+          && !document.querySelector('#settings-panel')?.classList.contains('is-visible')`,
+        true,
+      );
+
       await mainWindow.webContents.executeJavaScript(
         `document.body.classList.add('companion-dock-open')`,
         true,
@@ -1579,11 +1630,15 @@ function bindIpc() {
       const uiTest = {
         actionAutoClosed: Boolean(actionAutoClosed),
         outsideClickClosed: Boolean(outsideClickClosed),
+        rapidOutsideClosePassed,
+        blurClosed: Boolean(blurClosed),
         dockActions: Number(dockState?.actions),
         dockStats: Number(dockState?.stats),
         dockVisible: Boolean(dockState?.visible),
         passed: Boolean(actionAutoClosed)
           && Boolean(outsideClickClosed)
+          && rapidOutsideClosePassed
+          && Boolean(blurClosed)
           && Number(dockState?.actions) === 6
           && Number(dockState?.stats) === 4
           && Boolean(dockState?.visible),
@@ -1648,17 +1703,25 @@ async function runInteractionTimingTest(details) {
     if (!startAutonomousWalk()) throw new Error('Initial walk did not start.');
     await new Promise((resolve) => setTimeout(resolve, 900));
     const walking = sample('walking');
-    setInteractionPanelOpen(true);
+    // Exercise the real main -> renderer -> preload -> main path. The previous
+    // test called setInteractionPanelOpen() directly and could not catch UI/IPC
+    // regressions such as a panel that never released autonomous movement.
+    sendCommand('show-settings');
     await new Promise((resolve) => setTimeout(resolve, 450));
+    const panelOpened = await mainWindow.webContents.executeJavaScript(
+      "Boolean(document.querySelector('#settings-panel') && !document.querySelector('#settings-panel').hidden)",
+    );
     const stopped = sample('panel-open-stopped');
-    setInteractionPanelOpen(false);
-    const closedAt = Date.now();
+    const lastInteractionAt = Date.now();
     await new Promise((resolve) => setTimeout(resolve, 5000));
-    const after5Seconds = sample('after-close-5s');
+    const after5Seconds = sample('after-ui-idle-5s');
     await new Promise((resolve) => setTimeout(resolve, 9000));
-    const after14Seconds = sample('after-close-14s');
+    const after14Seconds = sample('after-ui-idle-14s');
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    const after17Seconds = sample('after-close-17s');
+    const after17Seconds = sample('after-ui-idle-17s');
+    const panelDismissed = await mainWindow.webContents.executeJavaScript(
+      "Boolean(document.querySelector('#settings-panel') && document.querySelector('#settings-panel').hidden)",
+    );
     stopAutonomousMovement(false);
     sendCommand('test-hide-overlays', true);
     await new Promise((resolve) => setTimeout(resolve, 180));
@@ -1679,17 +1742,19 @@ async function runInteractionTimingTest(details) {
     const feetReachCanvasBottom = Boolean(pixels)
       && pixels.y + pixels.height >= image.getSize().height - 2;
     const result = {
-      ok: startsBottomRight && movedBeforeStop && stationaryUntil15Seconds
-        && resumedAfter15Seconds && feetReachCanvasBottom,
+      ok: startsBottomRight && movedBeforeStop && panelOpened && stationaryUntil15Seconds
+        && resumedAfter15Seconds && panelDismissed && feetReachCanvasBottom,
       timestamp: new Date().toISOString(),
       details,
       displayBounds: display.bounds,
       startsBottomRight,
       movedBeforeStop,
+      panelOpened,
       stationaryUntil15Seconds,
       resumedAfter15Seconds,
+      panelDismissed,
       feetReachCanvasBottom,
-      cooldownMeasuredFrom: closedAt,
+      cooldownMeasuredFrom: lastInteractionAt,
       samples: [initial, walking, stopped, after5Seconds, after14Seconds, after17Seconds],
       visiblePixels: pixels,
       screenshotPath,

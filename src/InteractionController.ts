@@ -57,7 +57,13 @@ export class InteractionController {
     window.addEventListener('pointercancel', () => this.endDrag());
     window.addEventListener('wheel', (event) => this.onWheel(event), { passive: false });
     window.addEventListener('contextmenu', (event) => this.onContextMenu(event));
-    window.addEventListener('blur', () => this.endDrag());
+    window.addEventListener('blur', () => {
+      this.endDrag();
+      // Pointer events cannot cross a BrowserWindow boundary. Closing on blur
+      // covers clicks on another app/desktop as well as clicks inside our own
+      // transparent surface, so the panel never depends on one event path.
+      if (this.ui.isSettingsOpen()) this.ui.hideSettings();
+    });
     window.addEventListener('keydown', (event) => this.onKeyDown(event));
   }
 
