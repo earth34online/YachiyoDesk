@@ -1,3 +1,7 @@
+// About 84.8 degrees: enough to show the full palm on the built-in VRM rig
+// without twisting the wrist past the anatomical quarter-turn range.
+export const FRONT_PALM_TWIST_RADIANS = 1.48;
+
 /**
  * VRM normalized humanoid hand nodes share the same local wrist basis on both
  * sides. A palm-facing twist therefore uses the same signed X rotation for the

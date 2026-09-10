@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { viewerFacingPalmTwists } from '../src/handPose';
+import { FRONT_PALM_TWIST_RADIANS, viewerFacingPalmTwists } from '../src/handPose';
 
 describe('viewerFacingPalmTwists', () => {
+  it('uses an anatomical near-quarter-turn for front-facing raised palms', () => {
+    const degrees = FRONT_PALM_TWIST_RADIANS * 180 / Math.PI;
+    expect(degrees).toBeGreaterThan(80);
+    expect(degrees).toBeLessThan(90);
+  });
+
   it('uses the same normalized wrist direction on both sides', () => {
     expect(viewerFacingPalmTwists(1, 0.92)).toEqual({ left: 0.92, right: 0.92 });
   });

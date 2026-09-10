@@ -1,6 +1,6 @@
 import type { VRM } from '@pixiv/three-vrm';
 import * as THREE from 'three';
-import { viewerFacingPalmTwists } from './handPose';
+import { FRONT_PALM_TWIST_RADIANS, viewerFacingPalmTwists } from './handPose';
 import { ExpressionController } from './ExpressionController';
 import { clamp, damp, randomBetween, reactionEnvelope, smoothstep01 } from './math';
 import type { AppSettings, AutonomousMotion, MotionProfile, ReactionName } from './types';
@@ -519,7 +519,7 @@ export class ProceduralAnimator {
       // Twist only the wrist around the forearm axis so the palm, rather than
       // its edge, faces the viewer. The approved shoulder/elbow chain stays
       // exactly as tuned above.
-      const palm = viewerFacingPalmTwists(palmSign, 0.92);
+      const palm = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
       rightHandX = THREE.MathUtils.lerp(rightHandX, palm.right, weight);
       rightHandY += wave * 0.12 * weight;
       rightHandZ += wave * 0.055 * weight;
@@ -542,7 +542,7 @@ export class ProceduralAnimator {
       rightArmZ = THREE.MathUtils.lerp(rightArmZ, -0.76, weight);
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.24, weight);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.24, weight);
-      const palms = viewerFacingPalmTwists(palmSign, 0.64);
+      const palms = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
       leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, lift);
       rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, lift);
       leftFingerCurl = THREE.MathUtils.lerp(leftFingerCurl, 0.065 * fingerCurlScale, lift);
@@ -562,7 +562,7 @@ export class ProceduralAnimator {
       rightArmZ = THREE.MathUtils.lerp(rightArmZ, -0.88, weight);
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.34, weight);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.34, weight);
-      const palms = viewerFacingPalmTwists(palmSign, 0.86);
+      const palms = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
       leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, recoil);
       rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, recoil);
     } else if (reaction === 'angry') {
@@ -633,7 +633,7 @@ export class ProceduralAnimator {
       rightArmZ = THREE.MathUtils.lerp(rightArmZ, 0.52 + sway * 0.35, stretch);
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.22, stretch);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.22, stretch);
-      const palms = viewerFacingPalmTwists(palmSign, 0.88);
+      const palms = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
       leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, stretch);
       rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, stretch);
     } else if (reaction === 'dance') {
@@ -710,7 +710,11 @@ export class ProceduralAnimator {
       // elbows away from the body and produced the visible inverted joints.
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.32, active);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.32, active);
-      const palms = viewerFacingPalmTwists(palmSign, 0.92);
+      // Arms are nearly vertical here, so the wrist needs an almost quarter
+      // turn to present the full palm to the viewer. Keeping both normalized
+      // wrists on the same signed roll also leaves each thumb on the inner,
+      // face-facing edge of the V pose.
+      const palms = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
       leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, active);
       rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, active);
       leftFingerCurl = THREE.MathUtils.lerp(leftFingerCurl, 0.055 * fingerCurlScale, active);

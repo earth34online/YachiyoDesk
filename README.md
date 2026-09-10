@@ -62,8 +62,8 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 打开 [Releases](https://github.com/earth34online/YachiyoDesk/releases/latest)，在 **Assets** 区域选择一个版本：
 
-- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.1-x64-Portable.exe)：下载后直接运行，不写入安装目录。
-- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.1-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
+- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.2-x64-Portable.exe)：下载后直接运行，不写入安装目录。
+- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.2-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
 - [`SHA256SUMS.txt`](https://github.com/earth34online/YachiyoDesk/releases/latest/download/SHA256SUMS.txt)：校验下载文件完整性。
 
 下载后的操作顺序：
@@ -80,20 +80,20 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 $dir = Join-Path $env:USERPROFILE 'Downloads\YachiyoDesk'
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
 $base = 'https://github.com/earth34online/YachiyoDesk/releases/latest/download'
-Invoke-WebRequest "$base/YachiyoDesk-1.0.1-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.1-x64-Portable.exe')
-Invoke-WebRequest "$base/YachiyoDesk-1.0.1-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.1-x64-Setup.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.2-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.2-x64-Portable.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.2-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.2-x64-Setup.exe')
 Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $dir 'SHA256SUMS.txt')
 Set-Location $dir
-Get-FileHash .\YachiyoDesk-1.0.1-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.1-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.2-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.2-x64-Setup.exe -Algorithm SHA256
 ```
 
 确认哈希与 `SHA256SUMS.txt` 一致后运行其一：
 
 ```powershell
-Start-Process .\YachiyoDesk-1.0.1-x64-Portable.exe
+Start-Process .\YachiyoDesk-1.0.2-x64-Portable.exe
 # 或者
-Start-Process .\YachiyoDesk-1.0.1-x64-Setup.exe
+Start-Process .\YachiyoDesk-1.0.2-x64-Setup.exe
 ```
 
 Release asset 使用 `/releases/latest/download/<文件名>` 固定链接，更新版本后无需修改下载地址。
