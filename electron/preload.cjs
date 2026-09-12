@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('yachiyoDesk', {
   switchCharacter: (id) => ipcRenderer.invoke('characters:switch', id),
   removeCharacter: (id) => ipcRenderer.invoke('characters:remove', id),
   runtimeReady: (details) => ipcRenderer.send('runtime:ready', details),
+  runtimeViewportBounds: (details) => ipcRenderer.send('runtime:viewport-bounds', details),
   runtimeTelemetry: (details) => ipcRenderer.send('runtime:telemetry', details),
   runtimeError: (details) => ipcRenderer.send('runtime:error', details),
   onCommand: (callback) => subscribe('app:command', callback),

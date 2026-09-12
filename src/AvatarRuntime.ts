@@ -11,6 +11,7 @@ import { clamp, damp, nextAdaptiveScale, normalizedPointer } from './math';
 import { ProceduralAnimator } from './ProceduralAnimator';
 import type {
   AppSettings,
+  AvatarViewportBounds,
   AutonomyCommand,
   BootstrapData,
   HitZone,
@@ -46,6 +47,7 @@ export class AvatarRuntime {
   private settings: AppSettings;
   private modelHeight = 1.65;
   private modelWidth = 0.55;
+  private modelDepth = 0.30;
   private baseCameraDistance = 3;
   private targetRotationY = 0;
   private currentRotationY = 0;
@@ -295,6 +297,44 @@ export class AvatarRuntime {
     };
   }
 
+  avatarViewportBounds(): AvatarViewportBounds {
+    const canvasWidth = Math.max(1, this.canvas.clientWidth || window.innerWidth);
+    if (!this.vrm) return { left: 0, right: canvasWidth, canvasWidth };
+
+    // Project the neutral mesh footprint for the current user rotation plus
+    // either walking direction. This deliberately does not refit the camera or
+    // inspect animated cloth every frame, so it cannot reintroduce the former
+    // scale-growth/flicker bug. A small logical-pixel guard covers spring motion
+    // and antialiased edge pixels while still allowing transparent host margins
+    // to extend beyond the physical display.
+    const halfWidth = this.modelWidth * 0.5;
+    const halfDepth = this.modelDepth * 0.5;
+    const horizontalFov = 2 * Math.atan(
+      Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * Math.max(0.01, this.camera.aspect),
+    );
+    const tangent = Math.max(0.0001, Math.tan(horizontalFov / 2));
+    const angles = [this.settings.rotationY - 0.33, this.settings.rotationY, this.settings.rotationY + 0.33];
+    let projectedHalfWidth = 0;
+    for (const angle of angles) {
+      const cosine = Math.abs(Math.cos(angle));
+      const sine = Math.abs(Math.sin(angle));
+      const worldHalfWidth = halfWidth * cosine + halfDepth * sine;
+      const worldHalfDepth = halfWidth * sine + halfDepth * cosine;
+      const nearestDepth = Math.max(this.camera.near * 2, this.camera.position.z - worldHalfDepth);
+      projectedHalfWidth = Math.max(
+        projectedHalfWidth,
+        worldHalfWidth / (nearestDepth * tangent) * canvasWidth * 0.5,
+      );
+    }
+    const guard = Math.min(16, Math.max(8, canvasWidth * 0.022));
+    const extent = Math.min(canvasWidth * 0.5, projectedHalfWidth + guard);
+    return {
+      left: Math.floor(canvasWidth * 0.5 - extent),
+      right: Math.ceil(canvasWidth * 0.5 + extent),
+      canvasWidth,
+    };
+  }
+
   resize(): void {
     const width = Math.max(1, this.canvas.clientWidth || window.innerWidth);
     const height = Math.max(1, this.canvas.clientHeight || window.innerHeight);
@@ -388,6 +428,7 @@ export class AvatarRuntime {
     const size = centeredBounds.getSize(new THREE.Vector3());
     this.modelHeight = size.y;
     this.modelWidth = size.x;
+    this.modelDepth = size.z;
     const shadowWidth = Math.max(size.x * 0.55, size.y * 0.19);
     this.shadow.scale.set(shadowWidth, size.y * 0.17, 1);
     this.fitCamera();
@@ -620,6 +661,7 @@ export class AvatarRuntime {
       initialPixelRatio: Number(this.renderer.getPixelRatio().toFixed(3)),
       motionProfileId: this.bootstrap.character.motionProfile.profileId,
       tunedSpringJointCount: this.tunedSpringJointCount,
+      avatarViewportBounds: this.avatarViewportBounds(),
     };
   }
 }

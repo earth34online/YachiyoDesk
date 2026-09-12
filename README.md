@@ -29,7 +29,7 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 | 对白系统 | 角色对白、状态对白、随机闲聊 | 内容来自角色 manifest，可按角色替换 |
 | 宠物状态 | 饱腹、精力、心情、亲密度 | 本地持久化，不联网上传 |
 | 角色库 | 多角色、VRM 导入、角色切换、删除 | 角色存放于用户数据目录 |
-| PMX 导入 | 本机 Blender PMX/PMD → VRM | 不上传原始 PMX，转换结果只保存在本机 |
+| PMX 导入 | 本机 Blender PMX → VRM | 不上传原始 PMX，转换结果只保存在本机；当前不接受 `.pmd` 主模型 |
 | 画质与性能 | Ultra/High/Balanced、自适应像素倍率 | 保留模型纹理，不用低模替代高质量模型 |
 | 系统集成 | 系统托盘、桌面快捷方式、开机启动选项 | 可在设置中关闭，不强制常驻 |
 
@@ -62,8 +62,8 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 打开 [Releases](https://github.com/earth34online/YachiyoDesk/releases/latest)，在 **Assets** 区域选择一个版本：
 
-- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.2-x64-Portable.exe)：下载后直接运行，不写入安装目录。
-- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.2-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
+- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.3-x64-Portable.exe)：下载后直接运行，不写入安装目录。
+- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.3-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
 - [`SHA256SUMS.txt`](https://github.com/earth34online/YachiyoDesk/releases/latest/download/SHA256SUMS.txt)：校验下载文件完整性。
 
 下载后的操作顺序：
@@ -80,23 +80,23 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 $dir = Join-Path $env:USERPROFILE 'Downloads\YachiyoDesk'
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
 $base = 'https://github.com/earth34online/YachiyoDesk/releases/latest/download'
-Invoke-WebRequest "$base/YachiyoDesk-1.0.2-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.2-x64-Portable.exe')
-Invoke-WebRequest "$base/YachiyoDesk-1.0.2-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.2-x64-Setup.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.3-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.3-x64-Portable.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.3-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.3-x64-Setup.exe')
 Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $dir 'SHA256SUMS.txt')
 Set-Location $dir
-Get-FileHash .\YachiyoDesk-1.0.2-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.2-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.3-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.3-x64-Setup.exe -Algorithm SHA256
 ```
 
 确认哈希与 `SHA256SUMS.txt` 一致后运行其一：
 
 ```powershell
-Start-Process .\YachiyoDesk-1.0.2-x64-Portable.exe
+Start-Process .\YachiyoDesk-1.0.3-x64-Portable.exe
 # 或者
-Start-Process .\YachiyoDesk-1.0.2-x64-Setup.exe
+Start-Process .\YachiyoDesk-1.0.3-x64-Setup.exe
 ```
 
-Release asset 使用 `/releases/latest/download/<文件名>` 固定链接，更新版本后无需修改下载地址。
+`/releases/latest` 页面地址固定指向最新正式版本；Release asset 的文件名包含版本号，因此脚本中的 `1.0.3` 需要在下一次正式发布时同步更新。
 
 首次公开版启动时不会内置八千代模型。请点击“打开角色库并导入”，导入你有权使用的 `.vrm`，或导入 `.pmx` 让本机转换器生成 VRM；之后在角色库中点击“使用”。模型会保存在 `%APPDATA%\YachiyoDesk\characters`，下次启动会自动使用已选择的角色。软件本身默认保持 35% 显示比例、透明置顶窗口和开机启动设置，可在设置面板中调整。
 
@@ -128,7 +128,7 @@ Release asset 使用 `/releases/latest/download/<文件名>` 固定链接，更�
 
 1. **原作者提供、与本软件直接匹配的 VRM**：优先推荐，保留原始材质、表情、人体骨骼和 VRM SpringBone，动作与衣物物理质量最好。
 2. **其他标准 VRM 1.0/0.x**：可通过“导入 VRM”使用。软件会读取 humanoid 骨骼并应用通用动作；缺失骨骼、非标准命名、没有 SpringBone 或表情的模型会自动降级，可能没有完整脚步、手掌朝向、视线或衣物摆动。
-3. **PMX/PMD 本机转换**：通过“导入 PMX（自动转换）”调用本地 Blender 转换器。需要安装 Blender 4.x，并在设置或环境变量 `YACHIYO_BLENDER_PATH` 指向 `blender.exe`；转换会尽力映射人体骨骼、材质和物理，但 PMX 的非标准骨骼、刚体、Morph、复杂裙摆、特殊 toon 材质无法保证完全等价。转换后的结果存入用户数据目录，原 PMX 不会上传。
+3. **PMX 本机转换**：通过“导入 PMX（自动转换）”调用本地 Blender 转换器。需要安装 Blender 4.x，并在设置或环境变量 `YACHIYO_BLENDER_PATH` 指向 `blender.exe`；转换会尽力映射人体骨骼、材质和物理，但 PMX 的非标准骨骼、刚体、Morph、复杂裙摆、特殊 toon 材质无法保证完全等价。转换后的结果存入用户数据目录，原 PMX 不会上传。当前文件选择器和验证器只接受 `.pmx`，不接受 `.pmd` 主模型。
 
 通用动作会根据模型能力自适应；八千代专属微调只在八千代 manifest 中启用，不会污染未来导入角色。任何第三方角色都应由使用者自行确认模型许可、二次创作规则和再分发限制。
 
@@ -192,7 +192,7 @@ PMX 转换器默认搜索常见的 Blender 4.x 安装位置，也可以显式设
 $env:YACHIYO_BLENDER_PATH = 'C:\Program Files\Blender Foundation\Blender 4.5\blender.exe'
 ```
 
-转换时请把 PMX、同目录的纹理、`.pmd/.sph/.spa` 等依赖文件保留在原目录；转换完成后只将生成的 VRM 复制到应用数据目录，原始 PMX 不会被仓库收集。
+转换时请把 PMX、同目录的纹理、`.sph/.spa` 球形贴图和 toon 纹理等依赖文件保留在原目录；转换完成后只将生成的 VRM 复制到应用数据目录，原始 PMX 不会被仓库收集。
 
 ### 构建发布包
 

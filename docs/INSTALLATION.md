@@ -14,17 +14,17 @@
 下载后建议先校验 SHA-256：
 
 ```powershell
-Get-FileHash .\YachiyoDesk-1.0.2-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.2-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.3-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.3-x64-Setup.exe -Algorithm SHA256
 ```
 
 将输出与 Release 中的 `SHA256SUMS.txt` 对比。GitHub 的 `/releases/latest/download/...` 链接会始终指向最新正式 Release，适合脚本或收藏使用。
 
-当前 `v1.0.2` 的校验值如下；任何时候都应以对应 Release 中的 `SHA256SUMS.txt` 为准。
+当前 `v1.0.3` 的校验值如下；任何时候都应以对应 Release 中的 `SHA256SUMS.txt` 为准。
 
 ```text
-Portable  D12220BEF4BFCF59EAE3BDE428D81410EA9586477353B20121B69D17E5713F98
-Setup     0801EA714A036E178E5A11284A26EE54E01843DBC7C8BF0B2B67DCD302F97625
+Portable  5B347887070E897F1968BDE26006DF2DB0508EF221094FC6B6F0DE3A2D3DA1A9
+Setup     EC73D3E8A3B6BE15ED781EAA892F84F057811BBB0DE1A136D797D2A7EFCF1CF4
 ```
 
 如果 PowerShell 命令输出不同，不要运行该文件；重新从 Release 下载，或检查下载是否被代理、杀毒软件或浏览器中断。
@@ -60,7 +60,7 @@ VRM 是推荐格式。将你有权使用的 VRM 文件直接交给导入按钮�
 
 缺少某些能力时，YachiyoDesk 会使用通用动作并跳过不可用骨骼，不会因为一根缺失骨骼让整个角色崩溃。
 
-## 4. 导入 PMX/PMD
+## 4. 导入 PMX
 
 PMX 需要本机 Blender 4.x。转换器会尝试映射人体骨骼、材质、纹理、Morph、刚体和 SpringBone；由于 PMX 与 VRM 的骨骼、toon 材质和物理模型并非一一对应，复杂模型不保证完全等价。
 
@@ -83,7 +83,7 @@ Test-Path $env:YACHIYO_BLENDER_PATH
 
 请保持 PMX 与下列文件的相对位置不变：
 
-- `.pmx` / `.pmd` 主模型；
+- `.pmx` 主模型（当前版本不接受 `.pmd` 主模型）；
 - PNG/JPG/TGA/BMP 纹理；
 - `.sph`、`.spa` 球形贴图；
 - 模型依赖的 toon 纹理或外部材质文件。

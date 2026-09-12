@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AvatarViewportBounds,
   BootstrapData,
   CharacterImportResult,
   CommandMessage,
@@ -37,6 +38,7 @@ declare global {
       switchCharacter(id: string): Promise<{ ok: boolean; error?: string }>;
       removeCharacter(id: string): Promise<{ ok: boolean; canceled?: boolean; error?: string }>;
       runtimeReady(details: RuntimeDiagnostics): void;
+      runtimeViewportBounds(details: AvatarViewportBounds): void;
       runtimeTelemetry(details: RuntimePerformanceStats): void;
       runtimeError(details: { message: string; stack?: string }): void;
       onCommand(callback: (message: CommandMessage) => void): () => void;

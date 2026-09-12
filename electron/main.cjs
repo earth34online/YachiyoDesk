@@ -16,7 +16,7 @@ const {
 const fs = require('node:fs');
 const path = require('node:path');
 const { SettingsStore } = require('./settings.cjs');
-const { calculateDragPosition, clampDragPosition } = require('./window-drag.cjs');
+const { calculateDragPosition, clampDragPosition, horizontalWindowRange } = require('./window-drag.cjs');
 const { PMX_CONVERTED_MOTION_PROFILE, sanitizeMotionProfile } = require('./motion-profile.cjs');
 const { convertPmxToVrm, resolvePmxConverter } = require('./pmx-converter.cjs');
 
@@ -109,6 +109,7 @@ let smokeTimer = null;
 let boundsSaveTimer = null;
 let logFile = null;
 let latestRuntimeTelemetry = null;
+let avatarViewportBounds = null;
 let windowDrag = null;
 let windowDragTimer = null;
 let autonomyTimer = null;
@@ -454,12 +455,64 @@ function defaultBounds() {
   const displayBounds = screen.getPrimaryDisplay().bounds;
   const width = Math.min(DEFAULT_WIDTH, displayBounds.width);
   const height = Math.min(DEFAULT_HEIGHT, displayBounds.height);
+  const horizontal = horizontalWindowRange(displayBounds, width, avatarViewportBounds);
   return {
     width,
     height,
-    x: displayBounds.x + displayBounds.width - width,
+    x: horizontal?.maximumX ?? displayBounds.x + displayBounds.width - width,
     y: displayBounds.y + displayBounds.height - height,
   };
+}
+
+function sanitizeAvatarViewportBounds(value) {
+  const left = Number(value?.left);
+  const right = Number(value?.right);
+  const canvasWidth = Number(value?.canvasWidth);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(canvasWidth)) return null;
+  if (canvasWidth <= 0 || left < 0 || right <= left || right > canvasWidth) return null;
+  return { left, right, canvasWidth };
+}
+
+function updateAvatarViewportBounds(value, anchorInitialRight = false) {
+  const next = sanitizeAvatarViewportBounds(value);
+  if (!next) return false;
+  // Renderer resize notifications can arrive before the VRM is loaded. At that
+  // point AvatarRuntime deliberately reports the whole canvas as a safe
+  // placeholder. Ignoring that one value keeps the first real model footprint
+  // eligible for right-edge anchoring in runtime:ready.
+  if (!runtimeIsReady && next.left <= 0.5 && next.right >= next.canvasWidth - 0.5) return false;
+  const hadBounds = Boolean(avatarViewportBounds);
+  avatarViewportBounds = next;
+  if (!mainWindow || mainWindow.isDestroyed()) return true;
+
+  const bounds = mainWindow.getBounds();
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(bounds.x + bounds.width / 2),
+    y: Math.round(bounds.y + bounds.height / 2),
+  });
+  const strictRight = display.bounds.x + display.bounds.width - bounds.width;
+  const settings = settingsStore?.get();
+  const shouldAnchorRight = anchorInitialRight
+    && !hadBounds
+    && settings?.autonomousBehavior
+    && !settings?.lockPosition
+    && Math.abs(bounds.x - strictRight) <= 4;
+  if (shouldAnchorRight) {
+    const horizontal = horizontalWindowRange(display.bounds, bounds.width, avatarViewportBounds);
+    if (horizontal && horizontal.maximumX !== bounds.x) {
+      const anchored = { ...bounds, x: horizontal.maximumX, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
+      mainWindow.setBounds(anchored, false);
+      settingsStore.patch({ window: fixedSurfaceBounds(anchored) });
+      log('INFO', 'Avatar visible edge aligned to physical display', {
+        display: display.bounds,
+        viewport: avatarViewportBounds,
+        window: mainWindow.getBounds(),
+      });
+      return true;
+    }
+  }
+  clampCurrentWindowToDisplay();
+  return true;
 }
 
 function isBoundsVisible(bounds) {
@@ -738,7 +791,12 @@ function clampCurrentWindowToDisplay(anchorPoint) {
     ? { x: Math.round(Number(anchorPoint.x)), y: Math.round(Number(anchorPoint.y)) }
     : { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
   const display = screen.getDisplayNearestPoint(point);
-  const target = clampDragPosition(bounds, display.bounds, { width: bounds.width, height: bounds.height });
+  const target = clampDragPosition(
+    bounds,
+    display.bounds,
+    { width: bounds.width, height: bounds.height },
+    avatarViewportBounds,
+  );
   if (!target) return fixedSurfaceBounds(bounds);
   if (target.x !== bounds.x || target.y !== bounds.y) {
     mainWindow.setBounds({ x: target.x, y: target.y, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }, false);
@@ -814,8 +872,9 @@ function startAutonomousWalk() {
     y: Math.round(bounds.y + bounds.height / 2),
   });
   const displayBounds = currentDisplay.bounds;
-  const minimumX = displayBounds.x;
-  const maximumX = displayBounds.x + Math.max(0, displayBounds.width - bounds.width);
+  const horizontal = horizontalWindowRange(displayBounds, bounds.width, avatarViewportBounds);
+  if (!horizontal) return false;
+  const { minimumX, maximumX } = horizontal;
   if (maximumX - minimumX < 100) return false;
 
   let direction = settings.wanderMode === 'random'
@@ -1010,6 +1069,8 @@ function switchCharacter(id) {
   settingsStore.patch({ activeCharacterId: id });
   notifySettings(settingsStore.get());
   if (mainWindow && !mainWindow.isDestroyed()) {
+    runtimeIsReady = false;
+    avatarViewportBounds = null;
     mainWindow.setIgnoreMouseEvents(false);
     mainWindow.webContents.reloadIgnoringCache();
   }
@@ -1134,7 +1195,7 @@ function flushWindowDrag() {
   const position = clampDragPosition(rawPosition, display.bounds, {
     width: currentBounds.width,
     height: currentBounds.height,
-  });
+  }, avatarViewportBounds);
   if (!position) return;
   const { x, y } = position;
   const [currentX, currentY] = mainWindow.getPosition();
@@ -1448,13 +1509,18 @@ function bindIpc() {
     fs.rmSync(record.directory, { recursive: true, force: false });
     if (wasActive) settingsStore.patch({ activeCharacterId: 'yachiyo' });
     rebuildTrayMenu();
-    if (wasActive && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache();
+    if (wasActive && mainWindow && !mainWindow.isDestroyed()) {
+      runtimeIsReady = false;
+      avatarViewportBounds = null;
+      mainWindow.webContents.reloadIgnoringCache();
+    }
     return { ok: true };
   });
 
   ipcMain.on('runtime:ready', async (_event, details) => {
-    log('INFO', 'Avatar runtime ready', details);
     runtimeIsReady = true;
+    updateAvatarViewportBounds(details?.avatarViewportBounds, true);
+    log('INFO', 'Avatar runtime ready', details);
     if (IS_INTERACTION_TEST) {
       await runInteractionTimingTest(details);
       return;
@@ -1674,6 +1740,10 @@ function bindIpc() {
     latestRuntimeTelemetry = details;
   });
 
+  ipcMain.on('runtime:viewport-bounds', (_event, details) => {
+    updateAvatarViewportBounds(details);
+  });
+
   ipcMain.on('runtime:error', (_event, details) => {
     log('ERROR', 'Avatar runtime error', details);
     if (IS_AUTOMATED_TEST) {
@@ -1730,10 +1800,11 @@ async function runInteractionTimingTest(details) {
     const screenshotPath = path.join(artifacts, 'interaction-floor.png');
     fs.writeFileSync(screenshotPath, image.toPNG());
 
-    const expectedRight = display.bounds.x + display.bounds.width;
     const expectedBottom = display.bounds.y + display.bounds.height;
     const positionTolerance = 2;
-    const startsBottomRight = Math.abs(initial.bounds.x + initial.bounds.width - expectedRight) <= positionTolerance
+    const horizontal = horizontalWindowRange(display.bounds, initial.bounds.width, avatarViewportBounds);
+    const startsBottomRight = Boolean(horizontal)
+      && Math.abs(initial.bounds.x - horizontal.maximumX) <= positionTolerance
       && Math.abs(initial.bounds.y + initial.bounds.height - expectedBottom) <= positionTolerance;
     const movedBeforeStop = walking.bounds.x !== initial.bounds.x;
     const stationaryUntil15Seconds = stopped.bounds.x === after5Seconds.bounds.x

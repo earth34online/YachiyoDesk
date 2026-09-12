@@ -164,6 +164,13 @@ export interface RuntimeDiagnostics {
   initialPixelRatio: number;
   motionProfileId: string;
   tunedSpringJointCount: number;
+  avatarViewportBounds: AvatarViewportBounds;
+}
+
+export interface AvatarViewportBounds {
+  left: number;
+  right: number;
+  canvasWidth: number;
 }
 
 export interface RuntimePerformanceStats {

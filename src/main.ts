@@ -16,6 +16,7 @@ let interaction: InteractionController;
 async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
   currentSettings = await window.yachiyoDesk.updateSettings(patch);
   runtime.setSettings(currentSettings);
+  window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
   interaction.setSettings(currentSettings);
   ui.updateSettings(currentSettings);
 }
@@ -23,6 +24,7 @@ async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
 function previewSettingsPatch(patch: Partial<AppSettings>): void {
   const preview = { ...currentSettings, ...patch };
   runtime.setSettings(preview);
+  window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
   interaction.setSettings(preview);
 }
 
@@ -121,6 +123,7 @@ const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }
 const removeSettingsListener = window.yachiyoDesk.onSettingsChanged((settings) => {
   currentSettings = settings;
   runtime.setSettings(settings);
+  window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
   interaction.setSettings(settings);
   ui.updateSettings(settings);
 });
@@ -130,7 +133,10 @@ const removePetListener = window.yachiyoDesk.onPetStatusChanged((status) => ui.u
 let resizeFrame = 0;
 const handleWindowResize = (): void => {
   cancelAnimationFrame(resizeFrame);
-  resizeFrame = requestAnimationFrame(() => runtime.resize());
+  resizeFrame = requestAnimationFrame(() => {
+    runtime.resize();
+    window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
+  });
 };
 window.addEventListener('resize', handleWindowResize, { passive: true });
 
