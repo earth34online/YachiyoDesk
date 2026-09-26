@@ -52,6 +52,11 @@ const GENERIC_MOTION_PROFILE = Object.freeze({
 const PMX_CONVERTED_MOTION_PROFILE = Object.freeze({
   baseStandard: 'generic-vrm',
   capabilities: Object.freeze(['pmx-converted']),
+  legPose: Object.freeze({
+    // The MMD leg-forward axis is inverted below. The knee must bend in the
+    // opposite direction to the thigh during a squat, not fold up behind it.
+    kneeBendSign: 1,
+  }),
   handPose: Object.freeze({
     // MMD Tools' mirrored wrist basis makes the normalized waving target
     // face away from the viewer unless the palm twist is inverted. This

@@ -34,13 +34,14 @@ REQUIRED_HUMAN_BONES = {
 }
 
 
-def arguments() -> tuple[Path, Path, Path]:
+def arguments() -> tuple[Path, Path, Path, bool]:
     if "--" not in sys.argv:
         raise RuntimeError("Missing converter arguments after --")
     values = sys.argv[sys.argv.index("--") + 1 :]
-    if len(values) != 3:
-        raise RuntimeError("Expected: input.pmx output.vrm report.json")
-    return tuple(Path(value).resolve() for value in values)  # type: ignore[return-value]
+    compatibility_mode = len(values) == 4 and values[3] == "--compatibility-mode"
+    if len(values) != 3 and not compatibility_mode:
+        raise RuntimeError("Expected: input.pmx output.vrm report.json [--compatibility-mode]")
+    return (Path(values[0]).resolve(), Path(values[1]).resolve(), Path(values[2]).resolve(), compatibility_mode)
 
 
 def write_report(path: Path, payload: dict[str, object]) -> None:
@@ -73,6 +74,20 @@ def enable_converter_addons() -> None:
             result = bpy.ops.preferences.addon_enable(module=module)
             if result != {"FINISHED"}:
                 raise RuntimeError(f"Unable to enable Blender extension: {module}")
+
+
+def enable_crash_compatibility_mode() -> None:
+    """Retry-only workaround for Blender 4.5 native add-on crashes.
+
+    Keep the ordinary high-fidelity path untouched. This fallback omits PMX
+    custom normals (Blender recomputes them) and the add-on's Geometry Nodes
+    outline preview, while retaining exported MToon outline metadata.
+    """
+    from bl_ext.blender_org.mmd_tools.core.pmx.importer import PMXImporter
+    from bl_ext.blender_org.vrm.editor.mtoon1 import property_group
+
+    PMXImporter._PMXImporter__assignCustomNormals = lambda self: None
+    property_group.refresh_mtoon1_outline = lambda *args, **kwargs: None
 
 
 def import_pmx(input_path: Path) -> None:
@@ -446,17 +461,20 @@ def export_vrm(output_path: Path, armature: bpy.types.Object) -> None:
 
 
 def main() -> None:
-    input_path, output_path, report_path = arguments()
+    input_path, output_path, report_path, compatibility_mode = arguments()
     report: dict[str, object] = {
         "result": "FAIL",
         "input": str(input_path),
         "output": str(output_path),
         "blender": bpy.app.version_string,
+        "compatibilityMode": compatibility_mode,
     }
     try:
         if input_path.suffix.lower() != ".pmx" or not input_path.is_file():
             raise RuntimeError("Input must be an existing .pmx file")
         enable_converter_addons()
+        if compatibility_mode:
+            enable_crash_compatibility_mode()
         clear_scene()
         import_pmx(input_path)
         armature = find_armature()

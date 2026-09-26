@@ -31,6 +31,7 @@ const IS_DEV = process.argv.includes('--dev');
 const IS_SMOKE = process.argv.includes('--smoke-test');
 const IS_SOAK = process.argv.includes('--soak-test');
 const IS_MOTION_TEST = process.argv.includes('--motion-test');
+const IS_VISUAL_REVIEW = process.argv.includes('--visual-review');
 const IS_FLICKER_TEST = process.argv.includes('--flicker-test');
 const IS_INTERACTION_TEST = process.argv.includes('--interaction-test');
 const IS_AUTOMATED_TEST = IS_SMOKE || IS_SOAK || IS_MOTION_TEST || IS_FLICKER_TEST || IS_INTERACTION_TEST;
@@ -84,7 +85,7 @@ const SMOKE_ARTIFACTS = process.env.YACHIYO_DESK_SMOKE_DIR
     ? path.join(app.getPath('temp'), 'YachiyoDesk-smoke')
     : path.join(__dirname, '..', 'artifacts');
 
-if (IS_AUTOMATED_TEST) {
+if (IS_AUTOMATED_TEST || IS_VISUAL_REVIEW) {
   app.setPath('userData', path.join(SMOKE_ARTIFACTS, 'test-profile'));
 }
 
@@ -2051,6 +2052,14 @@ async function runMotionTest(details) {
     // wider than a 15% avatar and would otherwise look like model growth.
     sendCommand('test-hide-overlays', true);
     await new Promise((resolve) => setTimeout(resolve, 220));
+    if (process.env.YACHIYO_DESK_CAPTURE_BIND_POSE === '1') {
+      await mainWindow.webContents.executeJavaScript('window.__desktopPetBindPose?.(true)', true);
+      await new Promise((resolve) => setTimeout(resolve, 320));
+      const bindImage = await mainWindow.webContents.capturePage();
+      fs.writeFileSync(path.join(artifacts, 'motion-bind-pose.png'), bindImage.toPNG());
+      await mainWindow.webContents.executeJavaScript('window.__desktopPetBindPose?.(false)', true);
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    }
     const idleImage = await mainWindow.webContents.capturePage();
     const idleBounds = visiblePixelBounds(idleImage);
     screenshots.idle = path.join(artifacts, 'motion-idle.png');
@@ -2098,7 +2107,8 @@ async function runMotionTest(details) {
       width: DEFAULT_WIDTH,
       height: DEFAULT_HEIGHT,
     }, false);
-    await new Promise((resolve) => setTimeout(resolve, 420));
+    // Let the turn and spring cloth settle before comparing neutral outlines.
+    await new Promise((resolve) => setTimeout(resolve, 900));
     const settledWalkImage = await mainWindow.webContents.capturePage();
     walkTest.finalBounds = visiblePixelBounds(settledWalkImage);
     walkTest.settledSizeRatio = visibleSizeRatio([idleBounds, walkTest.finalBounds]);

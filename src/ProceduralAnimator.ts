@@ -768,8 +768,12 @@ export class ProceduralAnimator {
       rightFootY -= 0.035 * active;
       leftArmX = THREE.MathUtils.lerp(leftArmX, -0.055, active);
       rightArmX = THREE.MathUtils.lerp(rightArmX, -0.055, active);
-      leftArmZ = THREE.MathUtils.lerp(leftArmZ, 0.10, active);
-      rightArmZ = THREE.MathUtils.lerp(rightArmZ, -0.10, active);
+      // A converted PMX has a T-pose as its zero arm rotation. Near-zero here
+      // would turn a squat into an outstretched-arm pose. Keep its arms down;
+      // direct VRM and the built-in character retain their existing targets.
+      const crouchArmZ = this.motionProfile.capabilities.includes('pmx-converted') ? 1.08 : 0.10;
+      leftArmZ = THREE.MathUtils.lerp(leftArmZ, crouchArmZ, active);
+      rightArmZ = THREE.MathUtils.lerp(rightArmZ, -crouchArmZ, active);
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.10, active);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.10, active);
       leftFingerCurl = THREE.MathUtils.lerp(leftFingerCurl, 0.08 * fingerCurlScale, active);

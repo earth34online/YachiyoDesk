@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clamp, damp, nextAdaptiveScale, normalizedPointer } from './math';
 import { ProceduralAnimator } from './ProceduralAnimator';
+import { shouldCombineSkeletons } from './skin-policy';
 import type {
   AppSettings,
   AvatarViewportBounds,
@@ -62,6 +63,7 @@ export class AvatarRuntime {
   private readonly frameDurations: number[] = [];
   private started = false;
   private disposed = false;
+  private diagnosticBindPose = false;
 
   constructor(canvas: HTMLCanvasElement, bootstrap: BootstrapData, callbacks: RuntimeCallbacks) {
     this.canvas = canvas;
@@ -128,7 +130,12 @@ export class AvatarRuntime {
 
       if (vrm.meta.metaVersion === '0') VRMUtils.rotateVRM0(vrm);
       VRMUtils.removeUnnecessaryVertices(vrm.scene);
-      VRMUtils.combineSkeletons(vrm.scene);
+      // Preserve converted PMX skeleton/bind pairs; combining them can detach
+      // garment vertices even when the exported skin is symmetric.
+      // Built-in and direct VRM characters retain the original optimization.
+      if (shouldCombineSkeletons(this.bootstrap.character.motionProfile)) {
+        VRMUtils.combineSkeletons(vrm.scene);
+      }
       this.vrm = vrm;
       this.prepareModel(vrm);
       this.applyMotionProfile(vrm, this.bootstrap.character.motionProfile);
@@ -176,6 +183,15 @@ export class AvatarRuntime {
       };
     }
     return positions;
+  }
+
+  setDiagnosticBindPose(active: boolean): void {
+    if (!this.bootstrap.smokeTest || !this.vrm) return;
+    this.diagnosticBindPose = active;
+    if (active) {
+      this.vrm.humanoid.resetNormalizedPose();
+      this.vrm.springBoneManager?.reset();
+    }
   }
 
   setSettings(settings: AppSettings): void {
@@ -530,7 +546,7 @@ export class AvatarRuntime {
       if (this.frameDurations.length > 600) this.frameDurations.splice(0, this.frameDurations.length - 600);
     }
     this.renderedFrameCount += 1;
-    this.animator.update(delta);
+    if (!this.diagnosticBindPose) this.animator.update(delta);
     this.currentRotationY = damp(this.currentRotationY, this.targetRotationY + this.autonomyFacing, 8.5, delta);
     this.avatarPivot.rotation.y = this.currentRotationY;
     this.updateVrm(delta);

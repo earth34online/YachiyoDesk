@@ -80,16 +80,17 @@ function appendLimited(current, chunk) {
   return combined.length <= MAX_LOG_CHARS ? combined : combined.slice(-MAX_LOG_CHARS);
 }
 
-function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs = DEFAULT_TIMEOUT_MS, converter }) {
+async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs = DEFAULT_TIMEOUT_MS, converter }) {
   validatePmxSource(sourcePath);
   const resolvedConverter = converter || resolvePmxConverter();
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  return new Promise((resolve, reject) => {
+  const runAttempt = (compatibilityMode) => new Promise((resolve, reject) => {
     const child = spawn(resolvedConverter.blenderPath, [
       '--background',
       '--factory-startup',
       '--python', resolvedConverter.scriptPath,
       '--', sourcePath, outputPath, reportPath,
+      ...(compatibilityMode ? ['--compatibility-mode'] : []),
     ], {
       windowsHide: true,
       shell: false,
@@ -121,7 +122,12 @@ function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs = DEFAU
       }
       if (code !== 0 || report?.result !== 'PASS' || !fs.existsSync(outputPath)) {
         const detail = report?.error || stderr.trim().split(/\r?\n/).slice(-8).join('\n') || `退出代码 ${code}${signal ? `，信号 ${signal}` : ''}`;
-        finish(new Error(`PMX 转换失败：${detail}`));
+        const error = new Error(`PMX 转换失败：${detail}`);
+        // A native Blender crash has no JSON report. Retry once with the
+        // isolated add-on compatibility path instead of sacrificing quality
+        // for every model that works in the ordinary conversion mode.
+        error.nativeCrash = code !== 0 && !report;
+        finish(error);
         return;
       }
       finish(null, report);
@@ -131,6 +137,12 @@ function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs = DEFAU
       finish(new Error(`PMX 转换超过 ${Math.round(timeoutMs / 60000)} 分钟，已停止并回滚。`));
     }, timeoutMs);
   });
+  try {
+    return await runAttempt(false);
+  } catch (error) {
+    if (!error.nativeCrash) throw error;
+    return runAttempt(true);
+  }
 }
 
 module.exports = {

@@ -71,6 +71,7 @@ document.querySelector<HTMLButtonElement>('#setup-open-characters')?.addEventLis
 if (bootstrap.smokeTest) {
   Object.assign(window as unknown as Record<string, unknown>, {
     __desktopPetPoseSnapshot: () => runtime.humanoidPoseSnapshot(),
+    __desktopPetBindPose: (active: boolean) => runtime.setDiagnosticBindPose(active),
   });
 }
 

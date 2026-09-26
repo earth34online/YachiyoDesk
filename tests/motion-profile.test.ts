@@ -40,6 +40,7 @@ describe('character-scoped motion profiles', () => {
     expect(converted.handPose.wristAmplitudeScale).toBe(0.90);
     expect(converted.handPose.elbowBendScale).toBe(1.16);
     expect(converted.handPose.fingerCurlScale).toBe(1);
+    expect(converted.legPose.kneeBendSign).toBe(1);
 
     const directVrm = sanitizeMotionProfile(undefined, { id: 'direct-vrm', builtIn: false });
     expect(directVrm.handPose.armAxisSign).toBe(1);
