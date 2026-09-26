@@ -13,6 +13,8 @@ from array import array
 from pathlib import Path
 
 import bpy
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from garment_dynamics import garment_kind, garment_spring_settings
 
 
 REQUIRED_HUMAN_BONES = {
@@ -272,15 +274,40 @@ def configure_metadata(armature: bpy.types.Object, input_path: Path) -> None:
     meta.modification = "allowModification"
 
 
-def configure_spring_bones(armature: bpy.types.Object) -> dict[str, int | str]:
+def configure_spring_bones(armature: bpy.types.Object) -> dict[str, object]:
     result = bpy.ops.vrm.assign_spring_bone1_from_mmd(armature_object_name=armature.name)
     spring_bone = armature.data.vrm_addon_extension.spring_bone1
+    tuned: dict[str, int] = {}
+    for spring in spring_bone.springs:
+        # The add-on translates MMD rigid-body relationships but leaves every
+        # joint at 1 stiffness / 0 gravity. Apply dynamics only when the PMX
+        # actually has a dedicated garment chain. Rigid, bone-less sleeves
+        # cannot safely be made cloth by changing their arm skin weights.
+        first_name = spring.joints[0].node.bone_name if spring.joints else ""
+        kind = garment_kind(first_name or spring.vrm_name)
+        if not kind or len(spring.joints) < 2:
+            continue
+        for index, joint in enumerate(spring.joints):
+            values = garment_spring_settings(kind, index, len(spring.joints))
+            joint.stiffness = values["stiffness"]
+            joint.gravity_power = values["gravity_power"]
+            joint.drag_force = values["drag_force"]
+            if spring.collider_groups:
+                joint.hit_radius = values["hit_radius"]
+        tuned[kind] = tuned.get(kind, 0) + 1
+    named_garment_materials = {
+        kind
+        for material in bpy.data.materials
+        if (kind := garment_kind(material.name)) is not None
+    }
     return {
         "result": ",".join(sorted(result)),
         "colliders": len(spring_bone.colliders),
         "colliderGroups": len(spring_bone.collider_groups),
         "springs": len(spring_bone.springs),
         "joints": sum(len(spring.joints) for spring in spring_bone.springs),
+        "tunedGarmentChains": tuned,
+        "garmentsWithoutNamedSpringChains": sorted(named_garment_materials - tuned.keys()),
     }
 
 
