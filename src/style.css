@@ -219,8 +219,7 @@ label {
 }
 
 .test-hide-overlays .speech,
-.test-hide-overlays .toast,
-.test-hide-overlays .companion-dock {
+.test-hide-overlays .toast {
   display: none !important;
 }
 

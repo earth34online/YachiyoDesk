@@ -26,7 +26,6 @@ const DEFAULT_SETTINGS = Object.freeze({
   activityFrequency: 1,
   lookIntensity: 1,
   activeCharacterId: 'yachiyo',
-  characterZooms: Object.freeze({}),
   sleepMinutes: 3,
   window: null,
 });
@@ -85,14 +84,6 @@ function sanitizeSettings(value = {}) {
     && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.activeCharacterId)
     ? value.activeCharacterId
     : DEFAULT_SETTINGS.activeCharacterId;
-  output.characterZooms = {};
-  if (value.characterZooms && typeof value.characterZooms === 'object' && !Array.isArray(value.characterZooms)) {
-    for (const [id, zoom] of Object.entries(value.characterZooms).slice(0, 128)) {
-      if (/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id) && typeof zoom === 'number' && Number.isFinite(zoom)) {
-        output.characterZooms[id] = clampNumber(zoom, DEFAULT_SETTINGS.zoom, 0.10, 2.4);
-      }
-    }
-  }
   output.window = sanitizeWindow(value.window);
   return output;
 }

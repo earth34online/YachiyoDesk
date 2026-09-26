@@ -16,7 +16,6 @@ const {
 const fs = require('node:fs');
 const path = require('node:path');
 const { SettingsStore } = require('./settings.cjs');
-const { switchCharacterScale, rememberCharacterScale } = require('./character-scale.cjs');
 const { calculateDragPosition, clampDragPosition, horizontalWindowRange } = require('./window-drag.cjs');
 const { PMX_CONVERTED_MOTION_PROFILE, sanitizeMotionProfile } = require('./motion-profile.cjs');
 const { convertPmxToVrm, resolvePmxConverter } = require('./pmx-converter.cjs');
@@ -749,11 +748,7 @@ function applySettings(settings) {
 }
 
 function patchSettings(patch) {
-  const current = settingsStore.get();
-  const withScale = Object.prototype.hasOwnProperty.call(patch, 'zoom')
-    ? { ...patch, characterZooms: rememberCharacterScale(current, patch.zoom) }
-    : patch;
-  const settings = settingsStore.patch(withScale);
+  const settings = settingsStore.patch(patch);
   applySettings(settings);
   notifySettings(settings);
   if (!settings.autonomousBehavior || settings.lockPosition) {
@@ -1072,8 +1067,7 @@ function toggleSetting(key) {
 function switchCharacter(id) {
   const record = characterRecord(id);
   if (!record) return { ok: false, error: '角色不存在或文件已损坏。' };
-  if (id === settingsStore.get().activeCharacterId) return { ok: true };
-  settingsStore.patch(switchCharacterScale(settingsStore.get(), id));
+  settingsStore.patch({ activeCharacterId: id });
   notifySettings(settingsStore.get());
   if (mainWindow && !mainWindow.isDestroyed()) {
     runtimeIsReady = false;

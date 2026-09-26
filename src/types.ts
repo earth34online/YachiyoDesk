@@ -30,7 +30,6 @@ export interface AppSettings {
   activityFrequency: number;
   lookIntensity: number;
   activeCharacterId: string;
-  characterZooms: Record<string, number>;
   sleepMinutes: number;
   window: WindowBounds | null;
 }

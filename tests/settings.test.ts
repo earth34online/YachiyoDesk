@@ -43,13 +43,6 @@ describe('main-process settings validation', () => {
     expect(sanitizeSettings({ zoom: 0.01 }).zoom).toBe(0.10);
   });
 
-  it('persists only safe, finite per-character zoom entries', () => {
-    const settings = sanitizeSettings({
-      characterZooms: { yachiyo: 0.72, 'new-pmx': 0.48, '../escape': 1, invalid: Number.NaN },
-    });
-    expect(settings.characterZooms).toEqual({ yachiyo: 0.72, 'new-pmx': 0.48 });
-  });
-
   it('migrates existing profiles to the requested 35% launch size', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yachiyo-settings-'));
     try {

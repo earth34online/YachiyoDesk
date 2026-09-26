@@ -2,7 +2,6 @@ import type { VRM } from '@pixiv/three-vrm';
 import * as THREE from 'three';
 import { FRONT_PALM_TWIST_RADIANS, viewerFacingPalmTwists } from './handPose';
 import { ExpressionController } from './ExpressionController';
-import { legGait } from './gait';
 import { clamp, damp, randomBetween, reactionEnvelope, smoothstep01 } from './math';
 import type { AppSettings, AutonomousMotion, MotionProfile, ReactionName } from './types';
 
@@ -424,11 +423,8 @@ export class ProceduralAnimator {
       // strictly opposite in phase so one leg advances while the other trails;
       // this is the part that must remain visible even when a skirt covers the
       // knees. The amplitudes are intentionally shared by all imported rigs.
-      const convertedPmx = this.motionProfile.capabilities.includes('pmx-converted');
-      const leftGait = convertedPmx ? legGait(walkPhase) : null;
-      const rightGait = convertedPmx ? legGait(walkPhase + Math.PI) : null;
-      leftUpperLegX += (leftGait?.thigh ?? stride) * 0.56 * walk * walkTuning.strideScale;
-      rightUpperLegX += (rightGait?.thigh ?? -stride) * 0.56 * walk * walkTuning.strideScale;
+      leftUpperLegX += stride * 0.56 * walk * walkTuning.strideScale;
+      rightUpperLegX -= stride * 0.56 * walk * walkTuning.strideScale;
       // Keep the walking chain in the sagittal plane. PMX rigs mirror local
       // lateral axes between the two legs; adding a shared Z rotation can then
       // pull one foot across the body's midline. Natural balance is already
@@ -438,16 +434,16 @@ export class ProceduralAnimator {
       // is therefore invisible in idle or reactions.
       leftUpperLegZ += 0.09 * walk * walkTuning.strideScale;
       rightUpperLegZ -= 0.09 * walk * walkTuning.strideScale;
-      leftKneeX += (leftGait?.knee ?? leftSwing) * 0.90 * walk * walkTuning.kneeLiftScale;
-      rightKneeX += (rightGait?.knee ?? rightSwing) * 0.90 * walk * walkTuning.kneeLiftScale;
+      leftKneeX += leftSwing * 0.90 * walk * walkTuning.kneeLiftScale;
+      rightKneeX += rightSwing * 0.90 * walk * walkTuning.kneeLiftScale;
       // Ankle pitch is opposite during swing and stance; the toe joint adds
       // a small toe-off roll when the planted foot leaves the floor.
-      leftFootX += (leftGait?.ankle ?? (leftSwing * -0.52 + leftStance * 0.17)) * walk * walkTuning.kneeLiftScale;
-      rightFootX += (rightGait?.ankle ?? (rightSwing * 0.52 - rightStance * 0.17)) * walk * walkTuning.kneeLiftScale;
+      leftFootX += (leftSwing * -0.52 + leftStance * 0.17) * walk * walkTuning.kneeLiftScale;
+      rightFootX += (rightSwing * 0.52 - rightStance * 0.17) * walk * walkTuning.kneeLiftScale;
       // Do not add a lateral ankle offset: it is mirrored differently by MMD
       // local axes and can make one foot drift toward the other.
-      leftToeX += (leftGait?.toe ?? (leftSwing * 0.32 - leftStance * 0.24)) * walk * walkTuning.kneeLiftScale;
-      rightToeX += (rightGait?.toe ?? (rightSwing * 0.32 - rightStance * 0.24)) * walk * walkTuning.kneeLiftScale;
+      leftToeX += (leftSwing * 0.32 - leftStance * 0.24) * walk * walkTuning.kneeLiftScale;
+      rightToeX += (rightSwing * 0.32 - rightStance * 0.24) * walk * walkTuning.kneeLiftScale;
     }
 
     if (this.draggingWeight > 0.001) {
