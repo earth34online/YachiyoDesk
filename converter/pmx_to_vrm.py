@@ -15,6 +15,9 @@ from pathlib import Path
 import bpy
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from garment_dynamics import garment_kind, garment_spring_settings
+from garment_collision import add_garment_collisions
+from sleeve_rig import add_unrigged_sleeve_springs
+from skin_binding import audit_and_repair_skin_bindings
 
 
 REQUIRED_HUMAN_BONES = {
@@ -93,21 +96,75 @@ def enable_crash_compatibility_mode() -> None:
 
 
 def import_pmx(input_path: Path) -> None:
-    result = bpy.ops.mmd_tools.import_model(
-        filepath=str(input_path),
-        types={"MESH", "ARMATURE", "PHYSICS", "MORPHS"},
-        scale=0.08,
-        clean_model=False,
-        remove_doubles=False,
-        fix_bone_order=True,
-        fix_ik_links=True,
-        apply_bone_fixed_axis=False,
-        rename_bones=False,
-        use_underscore=False,
-        use_mipmap=True,
-        log_level="INFO",
-        save_log=False,
-    )
+    from bl_ext.blender_org.mmd_tools.core import pmx
+
+    # Some PMX archives contain a texture whose filename was damaged during
+    # packaging/extraction, while the PMX still references its original name.
+    # Repair the in-memory texture path only when the damaged filename is a
+    # unique match. Never rename or overwrite the user's source files.
+    model = pmx.load(str(input_path))
+    used_indices = set()
+    for material in model.materials:
+        for index in (
+            material.texture,
+            material.sphere_texture,
+            -1 if material.is_shared_toon_texture else material.toon_texture,
+        ):
+            if index >= 0:
+                used_indices.add(index)
+    recovered = []
+    missing = []
+    for index in sorted(used_indices):
+        if index >= len(model.textures):
+            missing.append({"index": index, "expected": "<invalid PMX texture index>"})
+            continue
+        texture = model.textures[index]
+        expected = Path(texture.path)
+        if expected.is_file():
+            continue
+        prefix_end = next((i for i, c in enumerate(expected.stem) if not c.isascii()), len(expected.stem))
+        ascii_prefix = expected.stem[:prefix_end]
+        candidates = []
+        if len(ascii_prefix) >= 3 and expected.parent.is_dir():
+            candidates = [
+                candidate for candidate in expected.parent.iterdir()
+                if candidate.is_file()
+                and candidate.stat().st_size > 0
+                and candidate.suffix.casefold() == expected.suffix.casefold()
+                and candidate.stem.casefold().startswith(ascii_prefix.casefold())
+                and "\ufffd" in candidate.name
+            ]
+        if len(candidates) == 1:
+            texture.path = str(candidates[0])
+            recovered.append({"index": index, "expected": str(expected), "resolved": texture.path})
+        else:
+            missing.append({"index": index, "expected": str(expected), "candidateCount": len(candidates)})
+    import_pmx.texture_diagnostics = {"recoveredTextures": recovered, "missingTextures": missing}
+    print("YACHIYO_PMX_TEXTURE_DIAGNOSTICS " + json.dumps(import_pmx.texture_diagnostics, ensure_ascii=False))
+    if missing:
+        names = ", ".join(Path(item["expected"]).name for item in missing[:5])
+        raise RuntimeError(f"PMX 引用的贴图缺失或文件名不匹配：{names}。请将模型与 TEX 等贴图目录一起正确解压。")
+
+    original_load = pmx.load
+    try:
+        pmx.load = lambda path: model if Path(path).resolve() == input_path else original_load(path)
+        result = bpy.ops.mmd_tools.import_model(
+            filepath=str(input_path),
+            types={"MESH", "ARMATURE", "PHYSICS", "MORPHS"},
+            scale=0.08,
+            clean_model=False,
+            remove_doubles=False,
+            fix_bone_order=True,
+            fix_ik_links=True,
+            apply_bone_fixed_axis=False,
+            rename_bones=False,
+            use_underscore=False,
+            use_mipmap=True,
+            log_level="INFO",
+            save_log=False,
+        )
+    finally:
+        pmx.load = original_load
     if result != {"FINISHED"}:
         raise RuntimeError(f"MMD Tools import failed: {sorted(result)}")
 
@@ -278,6 +335,7 @@ def configure_spring_bones(armature: bpy.types.Object) -> dict[str, object]:
     result = bpy.ops.vrm.assign_spring_bone1_from_mmd(armature_object_name=armature.name)
     spring_bone = armature.data.vrm_addon_extension.spring_bone1
     tuned: dict[str, int] = {}
+    trimmed_circumferential_roots = 0
     for spring in spring_bone.springs:
         # The add-on translates MMD rigid-body relationships but leaves every
         # joint at 1 stiffness / 0 gravity. Apply dynamics only when the PMX
@@ -287,6 +345,32 @@ def configure_spring_bones(armature: bpy.types.Object) -> dict[str, object]:
         kind = garment_kind(first_name or spring.vrm_name)
         if not kind or len(spring.joints) < 2:
             continue
+        if kind == "skirt" and len(spring.joints) >= 8:
+            # MMD physics can form a *horizontal waistband* and then continue
+            # down one skirt rib in the same bone chain. VRM spring bones treat
+            # that whole list as one hanging strand; simulating the waistband
+            # rotates its followers and can collapse half a skirt. Only trim
+            # when at least five consecutive links are clearly circumferential
+            # and the next link clearly descends. Pure vertical skirt chains
+            # (and all authored mesh skinning) remain unchanged.
+            points = [armature.data.bones.get(joint.node.bone_name) for joint in spring.joints]
+            if all(points):
+                horizontal_links = 0
+                for a, b in zip(points, points[1:]):
+                    delta = b.head_local - a.head_local
+                    xy = (delta.x * delta.x + delta.y * delta.y) ** 0.5
+                    if xy >= 0.012 and abs(delta.z) <= 0.007:
+                        horizontal_links += 1
+                    else:
+                        break
+                if horizontal_links >= 5 and horizontal_links + 2 < len(points):
+                    a, b = points[horizontal_links], points[horizontal_links + 1]
+                    delta = b.head_local - a.head_local
+                    xy = (delta.x * delta.x + delta.y * delta.y) ** 0.5
+                    if delta.z <= -0.012 and xy <= abs(delta.z) * 0.65:
+                        for _ in range(horizontal_links + 1):
+                            spring.joints.remove(0)
+                        trimmed_circumferential_roots += 1
         for index, joint in enumerate(spring.joints):
             values = garment_spring_settings(kind, index, len(spring.joints))
             joint.stiffness = values["stiffness"]
@@ -307,6 +391,7 @@ def configure_spring_bones(armature: bpy.types.Object) -> dict[str, object]:
         "springs": len(spring_bone.springs),
         "joints": sum(len(spring.joints) for spring in spring_bone.springs),
         "tunedGarmentChains": tuned,
+        "trimmedCircumferentialRoots": trimmed_circumferential_roots,
         "garmentsWithoutNamedSpringChains": sorted(named_garment_materials - tuned.keys()),
     }
 
@@ -495,34 +580,50 @@ def main() -> None:
         "output": str(output_path),
         "blender": bpy.app.version_string,
         "compatibilityMode": compatibility_mode,
+        "stage": "input-validation",
     }
     try:
         if input_path.suffix.lower() != ".pmx" or not input_path.is_file():
             raise RuntimeError("Input must be an existing .pmx file")
+        report["stage"] = "addon-setup"
         enable_converter_addons()
         if compatibility_mode:
             enable_crash_compatibility_mode()
         clear_scene()
+        report["stage"] = "pmx-import"
         import_pmx(input_path)
+        report.update(getattr(import_pmx, "texture_diagnostics", {}))
+        report["stage"] = "humanoid-mapping"
         armature = find_armature()
+        report["stage"] = "skin-binding-check"
+        skin_bindings = audit_and_repair_skin_bindings(armature)
+        report["skinBindings"] = skin_bindings
         assigned = assign_humanoid(armature)
         missing = sorted(REQUIRED_HUMAN_BONES - set(assigned))
         if missing:
             raise RuntimeError("Missing required humanoid bones: " + ", ".join(missing))
         configure_metadata(armature, input_path)
+        report["stage"] = "garment-and-material-setup"
         springs = configure_spring_bones(armature)
+        sleeve_rig = add_unrigged_sleeve_springs(armature, assigned)
+        garment_collisions = add_garment_collisions(armature)
         materials = configure_mtoon_materials()
         selected = select_export_objects(armature)
+        report["stage"] = "vrm-export"
         export_vrm(output_path, armature)
         report.update(
             {
                 "result": "PASS",
+                "stage": "complete",
                 "armature": armature.name,
                 "armatureBones": len(armature.data.bones),
                 "meshObjects": sum(1 for obj in bpy.data.objects if obj.type == "MESH"),
                 "selectedObjects": selected,
                 "humanBones": assigned,
+                "skinBindings": skin_bindings,
                 "springBones": springs,
+                "generatedSleeveRig": sleeve_rig,
+                "garmentCollisions": garment_collisions,
                 "mtoonMaterials": materials,
                 "outputBytes": output_path.stat().st_size,
             }
@@ -530,6 +631,7 @@ def main() -> None:
         write_report(report_path, report)
         print("YACHIYO_PMX_CONVERSION_PASS " + json.dumps(report, ensure_ascii=False))
     except Exception as error:
+        report.update(getattr(import_pmx, "texture_diagnostics", {}))
         report["error"] = str(error)
         report["traceback"] = traceback.format_exc()
         write_report(report_path, report)

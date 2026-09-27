@@ -37,11 +37,12 @@ flowchart TB
 
 1. 创建透明 WebGLRenderer 和灯光；
 2. 使用 `GLTFLoader + VRMLoaderPlugin` 读取 VRM；
-3. 清理不必要顶点并合并骨骼；
+3. 清理不必要顶点；只对原生 VRM 合并骨骼，已转换 PMX 保留原始蒙皮/骨架对应关系；
 4. 计算模型高度、相机距离、脚底锚点和点击碰撞网格；
 5. 将角色 motion profile 应用到手掌、肘部、步态和 SpringBone；
 6. 每帧更新表情、视线、动作、物理和性能统计；
-7. 在掉帧时只降低像素倍率，不替换原始模型网格和纹理。
+7. 对可识别且规模在预算内的 PMX 衣物可创建保留原材质/UV 的运行时网格副本，由 `src/garmentContact.ts` 进行有界的身体三角网格接触；不支持或超预算时显示原始蒙皮网格；
+8. 在掉帧时降低像素倍率，不替换原始模型纹理。
 
 没有模型时，runtime 不会尝试加载空 URL，而是触发首次导入引导；导入角色并切换后，窗口重新加载正常运行时。
 
@@ -55,7 +56,9 @@ flowchart TB
 - `springBone`：长发、裙摆、衣物关节筛选及阻尼；
 - `behavior`：自主活动动作权重和间隔。
 
-通用 profile 是所有导入角色的安全基础；八千代的 `yachiyo-long-garment-v1` 只在 `characters/yachiyo/character.json` 中启用。导入角色如果没有专属 profile，会使用 `generic-vrm`，并根据实际骨骼能力跳过不可用动作。
+通用 profile 是所有导入角色的安全基础；内置八千代使用 `characters/yachiyo/character.json` 的 `yachiyo-long-garment-v1`。通过 UI 导入时，`electron/recommended-model.cjs` 只对已验证的原作者 VRM/PMX 文件哈希启用对应的八千代专用 profile；原作者 PMX 仍保留 PMX 手腕/腿部坐标系补偿。其他文件无论名称是否包含“八千代”，都使用通用 profile。
+
+PMX 转换在 `converter/skin_binding.py` 审核骨骼权重，仅修补相邻权重归属明确的孤立空洞；复杂边界记录警告。`conversion-report.json` 保留材质、纹理、骨骼、蒙皮和服装物理诊断。`garmentContact.ts` 处理的是运行时可识别衣物与身体的局部接触，不是完整的布料自碰撞或衣物层间模拟；不能据此宣称任意模型零穿模。
 
 ## 角色 manifest
 

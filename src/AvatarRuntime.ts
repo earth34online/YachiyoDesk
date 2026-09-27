@@ -10,6 +10,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clamp, damp, nextAdaptiveScale, normalizedPointer } from './math';
 import { ProceduralAnimator } from './ProceduralAnimator';
 import { shouldCombineSkeletons } from './skin-policy';
+import { GarmentContactSolver } from './garmentContact';
 import type {
   AppSettings,
   AvatarViewportBounds,
@@ -45,6 +46,7 @@ export class AvatarRuntime {
   private readonly interactiveMeshes: THREE.Object3D[] = [];
   private vrm: VRM | null = null;
   private animator: ProceduralAnimator | null = null;
+  private garmentContact: GarmentContactSolver | null = null;
   private settings: AppSettings;
   private modelHeight = 1.65;
   private modelWidth = 0.55;
@@ -116,7 +118,7 @@ export class AvatarRuntime {
           resolve,
           (event) => {
             const progress = event.total > 0 ? event.loaded / event.total : 0;
-            this.callbacks.onProgress(8 + progress * 68, `载入原始高清模型 ${Math.round(progress * 100)}%`);
+            this.callbacks.onProgress(8 + progress * 68, `载入角色模型 ${Math.round(progress * 100)}%`);
           },
           reject,
         );
@@ -140,13 +142,27 @@ export class AvatarRuntime {
       this.prepareModel(vrm);
       this.applyMotionProfile(vrm, this.bootstrap.character.motionProfile);
 
+      // Converted PMX garments with identifiable body/cloth meshes receive a
+      // local triangle-contact pass. Built-in Yachiyo and direct VRM assets
+      // never enter this path; unsupported meshes keep their original skin.
+      this.garmentContact = GarmentContactSolver.create(vrm, this.bootstrap.character.motionProfile);
+      if (this.garmentContact) {
+        for (const { source, display } of this.garmentContact.replacements) {
+          const index = this.interactiveMeshes.indexOf(source);
+          // Keep both targets: the solver may fall back to the source mesh at
+          // runtime, and hitTest already ignores whichever one is invisible.
+          if (index >= 0) this.interactiveMeshes.push(display);
+        }
+        this.garmentContact.setEnabled(this.settings.physics);
+      }
+
       this.animator = new ProceduralAnimator(vrm, this.settings, this.bootstrap.character.motionProfile);
       vrm.springBoneManager?.setInitState();
       this.callbacks.onProgress(94, '启动表情、视线与摇摆骨骼…');
 
       this.started = true;
       this.renderer.setAnimationLoop((timestamp) => this.renderFrame(timestamp));
-      this.callbacks.onProgress(100, '八千代已准备好');
+      this.callbacks.onProgress(100, '角色已准备好');
       const diagnostics = this.collectDiagnostics();
       this.callbacks.onReady(diagnostics);
     } catch (unknownError) {
@@ -167,6 +183,8 @@ export class AvatarRuntime {
       VRMHumanBoneName.RightToes,
       VRMHumanBoneName.LeftUpperArm, VRMHumanBoneName.LeftLowerArm, VRMHumanBoneName.LeftHand,
       VRMHumanBoneName.RightUpperArm, VRMHumanBoneName.RightLowerArm, VRMHumanBoneName.RightHand,
+      VRMHumanBoneName.RightIndexProximal, VRMHumanBoneName.RightMiddleProximal,
+      VRMHumanBoneName.RightLittleProximal, VRMHumanBoneName.RightThumbProximal,
     ];
     this.avatarPivot.updateWorldMatrix(true, true);
     for (const bone of bones) {
@@ -183,6 +201,20 @@ export class AvatarRuntime {
       };
     }
     return positions;
+  }
+
+  secondaryPoseSnapshot(): Record<string, [number, number, number, number]> {
+    const result: Record<string, [number, number, number, number]> = {};
+    for (const joint of this.vrm?.springBoneManager?.joints ?? []) {
+      if (!joint.bone.name.startsWith('AutoSleeve_')) continue;
+      const { x, y, z, w } = joint.bone.quaternion;
+      result[joint.bone.name] = [x, y, z, w];
+    }
+    return result;
+  }
+
+  garmentContactSnapshot(): Record<string, unknown> | null {
+    return this.garmentContact ? { ...this.garmentContact.diagnostics } : GarmentContactSolver.lastProbe;
   }
 
   setDiagnosticBindPose(active: boolean): void {
@@ -211,7 +243,10 @@ export class AvatarRuntime {
       this.adaptiveScale = 1;
       this.updateRendererPixelRatio();
     }
-    if (physicsChanged) this.vrm?.springBoneManager?.reset();
+    if (physicsChanged) {
+      this.vrm?.springBoneManager?.reset();
+      this.garmentContact?.setEnabled(settings.physics);
+    }
     this.updateCamera();
   }
 
@@ -251,6 +286,7 @@ export class AvatarRuntime {
     this.autonomyFacing = 0;
     this.animator?.reset();
     this.vrm?.springBoneManager?.reset();
+    this.garmentContact?.reset();
   }
 
   setRotation(rotationY: number): void {
@@ -364,6 +400,7 @@ export class AvatarRuntime {
     if (this.disposed) return;
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
+    this.garmentContact?.dispose();
     if (this.vrm) VRMUtils.deepDispose(this.vrm.scene);
     this.shadow.geometry.dispose();
     (this.shadow.material as THREE.Material).dispose();
@@ -571,6 +608,7 @@ export class AvatarRuntime {
         this.vrm.springBoneManager.update(substep);
       }
     }
+    if (this.settings.physics) this.garmentContact?.update(delta);
     this.vrm.materials?.forEach((material) => (material as UpdatableMaterial).update?.(delta));
   }
 
@@ -677,6 +715,8 @@ export class AvatarRuntime {
       initialPixelRatio: Number(this.renderer.getPixelRatio().toFixed(3)),
       motionProfileId: this.bootstrap.character.motionProfile.profileId,
       tunedSpringJointCount: this.tunedSpringJointCount,
+      garmentPose: this.animator?.getGarmentPoseDiagnostics() ?? null,
+      garmentContact: this.garmentContact?.diagnostics ?? GarmentContactSolver.lastProbe,
       avatarViewportBounds: this.avatarViewportBounds(),
     };
   }

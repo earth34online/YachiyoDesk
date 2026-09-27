@@ -60,7 +60,13 @@ function validatePmxSource(sourcePath) {
   if (typeof sourcePath !== 'string' || path.extname(sourcePath).toLowerCase() !== '.pmx') {
     throw new Error('请选择扩展名为 .pmx 的模型文件。');
   }
-  const stats = fs.statSync(sourcePath);
+  let stats;
+  try {
+    stats = fs.statSync(sourcePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new Error('找不到所选 PMX 文件。请确认文件没有移动或删除。');
+    throw error;
+  }
   if (!stats.isFile() || stats.size < 32 || stats.size > MAX_PMX_BYTES) {
     throw new Error('PMX 文件大小无效，支持范围为 32 字节到 1 GB。');
   }
@@ -78,6 +84,30 @@ function validatePmxSource(sourcePath) {
 function appendLimited(current, chunk) {
   const combined = current + String(chunk);
   return combined.length <= MAX_LOG_CHARS ? combined : combined.slice(-MAX_LOG_CHARS);
+}
+
+function describePmxConversionFailure(error) {
+  const report = error?.report;
+  if (report?.missingTextures?.length) {
+    const files = report.missingTextures.slice(0, 4).map((item) => path.basename(item.expected)).join('、');
+    return `模型引用的贴图缺失或文件名不匹配：${files}。请完整解压 PMX 和贴图目录后重试。`;
+  }
+  if (report?.stage === 'humanoid-mapping') {
+    return `骨骼映射失败：${report.error || '缺少 VRM 所需的人形骨骼'}。请检查 PMX 骨骼结构。`;
+  }
+  if (report?.stage === 'vrm-export') {
+    return `VRM 导出失败：${report.error || '导出器未返回原因'}。详细诊断已写入本机日志。`;
+  }
+  if (report?.stage === 'addon-setup') {
+    return `转换引擎依赖加载失败：${report.error || '缺少 Blender 扩展'}。请检查本机 Blender 与扩展安装。`;
+  }
+  if (report?.stage === 'garment-and-material-setup') {
+    return `服装物理或材质配置失败：${report.error || '模型数据无法处理'}。详细诊断已写入本机日志。`;
+  }
+  if (report?.stage === 'pmx-import') {
+    return `PMX 解析或导入失败：${report.error || '模型文件或资源无法读取'}。详细诊断已写入本机日志。`;
+  }
+  return error?.message || 'PMX 转换失败，详细诊断已写入本机日志。';
 }
 
 async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs = DEFAULT_TIMEOUT_MS, converter }) {
@@ -107,7 +137,11 @@ async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs =
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (error) reject(error);
+      if (error) {
+        error.stdout ??= stdout;
+        error.stderr ??= stderr;
+        reject(error);
+      }
       else resolve({ report, stdout, stderr, converter: resolvedConverter });
     };
     child.stdout.on('data', (chunk) => { stdout = appendLimited(stdout, chunk); });
@@ -123,6 +157,9 @@ async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs =
       if (code !== 0 || report?.result !== 'PASS' || !fs.existsSync(outputPath)) {
         const detail = report?.error || stderr.trim().split(/\r?\n/).slice(-8).join('\n') || `退出代码 ${code}${signal ? `，信号 ${signal}` : ''}`;
         const error = new Error(`PMX 转换失败：${detail}`);
+        error.report = report;
+        error.stdout = stdout;
+        error.stderr = stderr;
         // A native Blender crash has no JSON report. Retry once with the
         // isolated add-on compatibility path instead of sacrificing quality
         // for every model that works in the ordinary conversion mode.
@@ -149,6 +186,7 @@ module.exports = {
   DEFAULT_TIMEOUT_MS,
   MAX_PMX_BYTES,
   convertPmxToVrm,
+  describePmxConversionFailure,
   resolvePmxConverter,
   validatePmxSource,
 };

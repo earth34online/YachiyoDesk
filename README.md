@@ -62,8 +62,8 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 打开 [Releases](https://github.com/earth34online/YachiyoDesk/releases/latest)，在 **Assets** 区域选择一个版本：
 
-- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.3-x64-Portable.exe)：下载后直接运行，不写入安装目录。
-- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.3-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
+- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.5-x64-Portable.exe)：下载后直接运行，不写入安装目录。
+- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.5-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
 - [`SHA256SUMS.txt`](https://github.com/earth34online/YachiyoDesk/releases/latest/download/SHA256SUMS.txt)：校验下载文件完整性。
 
 下载后的操作顺序：
@@ -80,23 +80,23 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 $dir = Join-Path $env:USERPROFILE 'Downloads\YachiyoDesk'
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
 $base = 'https://github.com/earth34online/YachiyoDesk/releases/latest/download'
-Invoke-WebRequest "$base/YachiyoDesk-1.0.3-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.3-x64-Portable.exe')
-Invoke-WebRequest "$base/YachiyoDesk-1.0.3-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.3-x64-Setup.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.5-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.5-x64-Portable.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.5-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.5-x64-Setup.exe')
 Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $dir 'SHA256SUMS.txt')
 Set-Location $dir
-Get-FileHash .\YachiyoDesk-1.0.3-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.3-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.5-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.5-x64-Setup.exe -Algorithm SHA256
 ```
 
 确认哈希与 `SHA256SUMS.txt` 一致后运行其一：
 
 ```powershell
-Start-Process .\YachiyoDesk-1.0.3-x64-Portable.exe
+Start-Process .\YachiyoDesk-1.0.5-x64-Portable.exe
 # 或者
-Start-Process .\YachiyoDesk-1.0.3-x64-Setup.exe
+Start-Process .\YachiyoDesk-1.0.5-x64-Setup.exe
 ```
 
-`/releases/latest` 页面地址固定指向最新正式版本；Release asset 的文件名包含版本号，因此脚本中的 `1.0.3` 需要在下一次正式发布时同步更新。
+`/releases/latest` 页面地址固定指向最新正式版本；Release asset 的文件名包含版本号，因此脚本中的 `1.0.5` 需要在下一次正式发布时同步更新。
 
 首次公开版启动时不会内置八千代模型。请点击“打开角色库并导入”，导入你有权使用的 `.vrm`，或导入 `.pmx` 让本机转换器生成 VRM；之后在角色库中点击“使用”。模型会保存在 `%APPDATA%\YachiyoDesk\characters`，下次启动会自动使用已选择的角色。新导入角色首次启用时按 35% 显示；之后每个角色分别记住手动调整的比例，不会覆盖八千代已有的比例。透明置顶窗口和开机启动设置可在面板中调整。
 
@@ -115,7 +115,7 @@ Start-Process .\YachiyoDesk-1.0.3-x64-Setup.exe
 
 仓库和 Release **不包含八千代的 VRM、PMX、纹理或模型压缩包**。本地随项目保存的 `characters/yachiyo/MODEL_LICENSE.txt` 明确规定“再配布：NG”，因此不把模型数据上传到 GitHub，避免让使用者或维护者违反原作者条款。
 
-八千代模型请从原作者水色の描提供的页面获取，并以下载页面当前的条款为准：
+八千代模型请从原作者水色の描提供的页面获取，并以下载页面当前的条款为准。优先使用[原作者的月见八千代 BOOTH 页面](https://booth.pm/ja/items/8157937)提供的免费 VRM 或包含 PMX 的压缩包；下列是作者其他发布渠道：
 
 - [VRoid Hub](https://hub.vroid.com/users/98041368)
 - [ニコニ立体](https://3d.nicovideo.jp/users/134997762)
@@ -126,9 +126,9 @@ Start-Process .\YachiyoDesk-1.0.3-x64-Setup.exe
 
 ## 角色优先级与兼容性
 
-1. **原作者提供、与本软件直接匹配的 VRM**：优先推荐，保留原始材质、表情、人体骨骼和 VRM SpringBone，动作与衣物物理质量最好。
+1. **原作者提供、与本软件直接匹配的八千代 VRM**：优先推荐，保留原始材质、表情、人体骨骼和 VRM SpringBone。导入时按原始文件 SHA-256 识别已验证版本并应用八千代专用动作、对白和衣物配置；仅靠文件名相同不会触发专用配置。原作者若更新文件，哈希变化后将先按通用角色处理，直到维护者重新验证。
 2. **其他标准 VRM 1.0/0.x**：可通过“导入 VRM”使用。软件会读取 humanoid 骨骼并应用通用动作；缺失骨骼、非标准命名、没有 SpringBone 或表情的模型会自动降级，可能没有完整脚步、手掌朝向、视线或衣物摆动。
-3. **PMX 本机转换**：通过“导入 PMX（自动转换）”调用本地 Blender 转换器。需要安装 Blender 4.x，并在设置或环境变量 `YACHIYO_BLENDER_PATH` 指向 `blender.exe`；转换会尽力映射人体骨骼、材质和物理。转换器会对源模型已有独立物理骨链的裙摆、袖子、披风和饰带做保守弹簧参数调校；如果袖子仅蒙皮在手臂骨上、没有独立袖骨，不能凭参数自动生成真实布料下垂，转换报告会标出没有同名物理链的服饰类别。重新导入 PMX 才会应用新版转换参数，既有 VRM 不会被静默覆盖。PMX 的非标准骨骼、刚体、Morph、复杂裙摆、特殊 toon 材质无法保证完全等价。转换后的结果存入用户数据目录，原 PMX 不会上传。当前文件选择器和验证器只接受 `.pmx`，不接受 `.pmd` 主模型。
+3. **PMX 本机转换**：通过“导入 PMX（自动转换）”调用本地 Blender 转换器。需要安装 Blender 4.x，并在设置或环境变量 `YACHIYO_BLENDER_PATH` 指向 `blender.exe`；转换会尽力映射人体骨骼、材质和物理。转换器检查蒙皮权重，仅对邻域骨骼归属一致的孤立缺权重顶点自动补权重；不确定的情况会提示并留在 `conversion-report.json`，不会乱改裙摆、袖口的混合边界。已识别的原作者八千代 PMX 会使用专用配置，同时保留 PMX 手腕/腿部坐标系补偿；其他 PMX 使用通用配置。对可识别的裙摆/袖子和身体蒙皮网格，运行时会尝试有预算上限的网格接触；不支持的结构或超时会回退原渲染。无法承诺任意模型完全零穿模或自动生成真实布料。重新导入 PMX 才会应用新版转换参数，既有 VRM 不会被静默覆盖。PMX 的非标准骨骼、刚体、Morph、复杂裙摆、特殊 toon 材质无法保证完全等价。转换后的结果存入用户数据目录，原 PMX 不会上传。当前只接受 `.pmx`，不接受 `.pmd` 主模型。
 
 通用动作会根据模型能力自适应；八千代专属微调只在八千代 manifest 中启用，不会污染未来导入角色。任何第三方角色都应由使用者自行确认模型许可、二次创作规则和再分发限制。
 

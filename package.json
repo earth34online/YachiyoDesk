@@ -1,6 +1,6 @@
 {
   "name": "yachiyo-desk",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "A high-quality local desktop companion with VRM/PMX character import",
   "author": "Excalibur",
@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@pixiv/three-vrm": "3.5.5",
-    "three": "0.185.1"
+    "three": "0.185.1",
+    "three-mesh-bvh": "0.9.15"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
@@ -50,18 +51,32 @@
       {
         "from": "characters",
         "to": "characters",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "converter",
         "to": "converter",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
-        { "target": "portable", "arch": ["x64"] },
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.ico",
       "artifactName": "YachiyoDesk-${version}-${arch}-${target}.${ext}"

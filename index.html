@@ -10,20 +10,20 @@
     <title>YachiyoDesk</title>
   </head>
   <body>
-    <canvas id="stage" aria-label="八千代桌面伴侣"></canvas>
+    <canvas id="stage" aria-label="桌面角色"></canvas>
     <div id="loading" class="loading" role="status">
       <div class="loading-card">
         <div class="moon-mark">月</div>
-        <div class="loading-title">八千代正在醒来</div>
-        <div id="loading-detail" class="loading-detail">载入原始高清模型…</div>
+        <div class="loading-title">启动中</div>
+        <div id="loading-detail" class="loading-detail">载入角色模型…</div>
         <div class="loading-track"><div id="loading-progress"></div></div>
       </div>
     </div>
     <div id="speech" class="speech" aria-live="polite"></div>
     <div id="toast" class="toast" aria-live="polite"></div>
-    <aside id="companion-dock" class="companion-dock" aria-label="八千代快捷互动">
+    <aside id="companion-dock" class="companion-dock" aria-label="角色快捷互动">
       <header>
-        <span>八千代</span>
+        <span id="dock-character-name">角色</span>
         <small>陪伴状态</small>
       </header>
       <div id="dock-status" class="dock-status"></div>

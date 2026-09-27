@@ -86,7 +86,7 @@ function sanitizePatterns(value) {
     .slice(0, 12))];
 }
 
-function sanitizeMotionProfile(value, { id, builtIn } = {}) {
+function sanitizeMotionProfile(value, { id, builtIn, verifiedYachiyo = false } = {}) {
   const candidate = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const walk = candidate.walk && typeof candidate.walk === 'object' ? candidate.walk : {};
   const physics = candidate.physics && typeof candidate.physics === 'object' ? candidate.physics : {};
@@ -97,7 +97,7 @@ function sanitizeMotionProfile(value, { id, builtIn } = {}) {
     ? [...new Set(candidate.capabilities.filter((item) => ['long-garment', 'pmx-converted'].includes(item)))].slice(0, 4)
     : [];
   const springEnabled = capabilities.includes('long-garment') && spring.enabled === true;
-  const yachiyoProfile = builtIn === true && id === 'yachiyo';
+  const yachiyoProfile = (builtIn === true && id === 'yachiyo') || verifiedYachiyo === true;
 
   return {
     // Imported characters always remain based on the generic standard. A

@@ -127,6 +127,9 @@ export interface InstalledCharacter {
 export interface CharacterImportResult {
   canceled: boolean;
   character?: InstalledCharacter;
+  error?: string;
+  diagnosticPath?: string;
+  warnings?: string[];
 }
 
 export type AppCommand =
@@ -165,6 +168,26 @@ export interface RuntimeDiagnostics {
   initialPixelRatio: number;
   motionProfileId: string;
   tunedSpringJointCount: number;
+  garmentPose: {
+    left: number;
+    right: number;
+    leftRadius: number;
+    rightRadius: number;
+    frontDepth: number;
+    backDepth: number;
+    gaitScale: number;
+    lateralGaitScale: number;
+    height: number;
+  } | null;
+  garmentContact: {
+    enabled: boolean;
+    garmentMeshes: number;
+    garmentVertices: number;
+    bodyVertices: number;
+    lastContacts: number;
+    averageMs: number;
+    fallbackReason: string;
+  } | { fallbackReason: string; candidates: string[] } | null;
   avatarViewportBounds: AvatarViewportBounds;
 }
 

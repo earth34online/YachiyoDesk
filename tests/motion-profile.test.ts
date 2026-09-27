@@ -6,7 +6,7 @@ const { PMX_CONVERTED_MOTION_PROFILE, sanitizeMotionProfile } = require('../elec
   PMX_CONVERTED_MOTION_PROFILE: Record<string, any>;
   sanitizeMotionProfile: (
     value: Record<string, unknown> | undefined,
-    context: { id: string; builtIn: boolean },
+    context: { id: string; builtIn: boolean; verifiedYachiyo?: boolean },
   ) => Record<string, any>;
 };
 
@@ -60,6 +60,13 @@ describe('character-scoped motion profiles', () => {
     expect(profile.profileId).toBe('generic-vrm');
     expect(profile.springBone.enabled).toBe(true);
     expect(profile.springBone.jointNamePatterns).toEqual(['myskirt']);
+  });
+
+  it('allows the dedicated profile only for a separately verified author model', () => {
+    const source = { profileId: 'yachiyo-author-vrm-v1', capabilities: ['long-garment'] };
+    expect(sanitizeMotionProfile(source, { id: 'local', builtIn: false }).profileId).toBe('generic-vrm');
+    expect(sanitizeMotionProfile(source, { id: 'local', builtIn: false, verifiedYachiyo: true }).profileId)
+      .toBe('yachiyo-author-vrm-v1');
   });
 
   it('keeps Yachiyo tuning scoped and clamps unsafe values', () => {

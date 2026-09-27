@@ -1,8 +1,9 @@
-import type { VRM } from '@pixiv/three-vrm';
+import { VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
 import * as THREE from 'three';
 import { FRONT_PALM_TWIST_RADIANS, viewerFacingPalmTwists } from './handPose';
 import { ExpressionController } from './ExpressionController';
 import { legGait } from './gait';
+import { skirtGaitScale, skirtLateralGaitScale, skirtRestArmAngle } from './garmentPose';
 import { clamp, damp, randomBetween, reactionEnvelope, smoothstep01 } from './math';
 import type { AppSettings, AutonomousMotion, MotionProfile, ReactionName } from './types';
 
@@ -125,6 +126,7 @@ export class ProceduralAnimator {
   private readonly transitionQuaternion = new THREE.Quaternion();
   private settings: AppSettings;
   private readonly motionProfile: MotionProfile;
+  private readonly skirtRestAngles: { left: number; right: number; leftRadius: number; rightRadius: number; frontDepth: number; backDepth: number; gaitScale: number; lateralGaitScale: number; height: number } | null;
   private elapsed = 0;
   private nextBlinkAt = randomBetween(2.2, 4.8);
   private blinkStartedAt = -1;
@@ -151,6 +153,7 @@ export class ProceduralAnimator {
     this.vrm = vrm;
     this.settings = settings;
     this.motionProfile = motionProfile;
+    this.skirtRestAngles = this.measureSkirtRestAngles();
     this.pose = createReusablePose(motionProfile.capabilities.includes('pmx-converted'));
     this.expressions = new ExpressionController(vrm.expressionManager);
     if (vrm.lookAt) vrm.lookAt.autoUpdate = false;
@@ -158,6 +161,10 @@ export class ProceduralAnimator {
 
   setSettings(settings: AppSettings): void {
     this.settings = settings;
+  }
+
+  getGarmentPoseDiagnostics(): typeof this.skirtRestAngles {
+    return this.skirtRestAngles;
   }
 
   setPointer(x: number, y: number, active: boolean): void {
@@ -427,8 +434,9 @@ export class ProceduralAnimator {
       const convertedPmx = this.motionProfile.capabilities.includes('pmx-converted');
       const leftGait = convertedPmx ? legGait(walkPhase) : null;
       const rightGait = convertedPmx ? legGait(walkPhase + Math.PI) : null;
-      leftUpperLegX += (leftGait?.thigh ?? stride) * 0.56 * walk * walkTuning.strideScale;
-      rightUpperLegX += (rightGait?.thigh ?? -stride) * 0.56 * walk * walkTuning.strideScale;
+      const skirtGait = this.skirtRestAngles?.gaitScale ?? 1;
+      leftUpperLegX += (leftGait?.thigh ?? stride) * 0.56 * walk * walkTuning.strideScale * skirtGait;
+      rightUpperLegX += (rightGait?.thigh ?? -stride) * 0.56 * walk * walkTuning.strideScale * skirtGait;
       // Keep the walking chain in the sagittal plane. PMX rigs mirror local
       // lateral axes between the two legs; adding a shared Z rotation can then
       // pull one foot across the body's midline. Natural balance is already
@@ -436,18 +444,19 @@ export class ProceduralAnimator {
       // A small outward support offset preserves each foot's landing side
       // while the forward/back hinge is active; it fades with walkWeight and
       // is therefore invisible in idle or reactions.
-      leftUpperLegZ += 0.09 * walk * walkTuning.strideScale;
-      rightUpperLegZ -= 0.09 * walk * walkTuning.strideScale;
-      leftKneeX += (leftGait?.knee ?? leftSwing) * 0.90 * walk * walkTuning.kneeLiftScale;
-      rightKneeX += (rightGait?.knee ?? rightSwing) * 0.90 * walk * walkTuning.kneeLiftScale;
+      const lateralClearance = Math.min(skirtGait, this.skirtRestAngles?.lateralGaitScale ?? 1);
+      leftUpperLegZ += 0.09 * walk * walkTuning.strideScale * lateralClearance;
+      rightUpperLegZ -= 0.09 * walk * walkTuning.strideScale * lateralClearance;
+      leftKneeX += (leftGait?.knee ?? leftSwing) * 0.90 * walk * walkTuning.kneeLiftScale * skirtGait;
+      rightKneeX += (rightGait?.knee ?? rightSwing) * 0.90 * walk * walkTuning.kneeLiftScale * skirtGait;
       // Ankle pitch is opposite during swing and stance; the toe joint adds
       // a small toe-off roll when the planted foot leaves the floor.
-      leftFootX += (leftGait?.ankle ?? (leftSwing * -0.52 + leftStance * 0.17)) * walk * walkTuning.kneeLiftScale;
-      rightFootX += (rightGait?.ankle ?? (rightSwing * 0.52 - rightStance * 0.17)) * walk * walkTuning.kneeLiftScale;
+      leftFootX += (leftGait?.ankle ?? (leftSwing * -0.52 + leftStance * 0.17)) * walk * walkTuning.kneeLiftScale * skirtGait;
+      rightFootX += (rightGait?.ankle ?? (rightSwing * 0.52 - rightStance * 0.17)) * walk * walkTuning.kneeLiftScale * skirtGait;
       // Do not add a lateral ankle offset: it is mirrored differently by MMD
       // local axes and can make one foot drift toward the other.
-      leftToeX += (leftGait?.toe ?? (leftSwing * 0.32 - leftStance * 0.24)) * walk * walkTuning.kneeLiftScale;
-      rightToeX += (rightGait?.toe ?? (rightSwing * 0.32 - rightStance * 0.24)) * walk * walkTuning.kneeLiftScale;
+      leftToeX += (leftGait?.toe ?? (leftSwing * 0.32 - leftStance * 0.24)) * walk * walkTuning.kneeLiftScale * skirtGait;
+      rightToeX += (rightGait?.toe ?? (rightSwing * 0.32 - rightStance * 0.24)) * walk * walkTuning.kneeLiftScale * skirtGait;
     }
 
     if (this.draggingWeight > 0.001) {
@@ -511,22 +520,21 @@ export class ProceduralAnimator {
       rightShoulderY -= 0.025 * weight;
       rightShoulderZ += 0.035 * weight;
       // Treat shoulder, upper arm, elbow and wrist as one constrained chain.
-      // The upper arm carries the hand upward; the elbow has one dominant bend
-      // axis, and the wave is mostly wrist yaw. This avoids the corkscrew motion
-      // caused by animating all three forearm Euler axes independently.
+      // The upper arm carries the hand upward. The greeting oscillates around
+      // the elbow's lift axis so the palm travels visibly up/down in screen
+      // space; yawing the wrist made it pump toward/away from the viewer.
       rightArmX = THREE.MathUtils.lerp(rightArmX, -0.07, weight);
       rightArmY = THREE.MathUtils.lerp(rightArmY, -0.025, weight);
-      rightArmZ = THREE.MathUtils.lerp(rightArmZ, -0.41, weight);
+      rightArmZ = THREE.MathUtils.lerp(rightArmZ, -0.41 + wave * 0.035, weight);
       rightLowerX = THREE.MathUtils.lerp(rightLowerX, -0.025, weight);
       rightLowerY = THREE.MathUtils.lerp(rightLowerY, -0.015, weight);
-      rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 1.08 + wave * 0.035, weight);
+      rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 1.08 + wave * 0.16, weight);
       // Twist only the wrist around the forearm axis so the palm, rather than
       // its edge, faces the viewer. The approved shoulder/elbow chain stays
       // exactly as tuned above.
       const palm = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
       rightHandX = THREE.MathUtils.lerp(rightHandX, palm.right, weight);
-      rightHandY += wave * 0.12 * weight;
-      rightHandZ += wave * 0.055 * weight;
+      rightHandZ += wave * 0.015 * weight;
       // Open the waving hand while retaining a relaxed thumb; a flat rigid
       // hand reads as an animation error on converted PMX rigs.
       rightFingerCurl = THREE.MathUtils.lerp(rightFingerCurl, 0.045 * fingerCurlScale, weight);
@@ -818,6 +826,15 @@ export class ProceduralAnimator {
       rightKneeX += Math.max(0, -step) * 0.22 * active;
     }
 
+    // At rest, position the hands beside the imported skirt's *measured*
+    // radius. A fixed wide-skirt pose held narrow-skirt hands far from clothing;
+    // a fixed narrow-skirt pose buried hands in bell skirts. Gestures and the
+    // built-in/direct-VRM paths retain their existing motion targets.
+    if (this.skirtRestAngles && !reaction && this.draggingWeight < 0.01) {
+      leftArmZ = this.skirtRestAngles.left;
+      rightArmZ = -this.skirtRestAngles.right;
+    }
+
     this.setPosition('hips', hipsX, hipsY, hipsZ * rootDepthAxisSign);
     this.setRotation('hips', 0, torsoY * 0.30, torsoZ * 0.24);
     this.setRotation('spine', torsoX * 0.36 * bodyForwardAxisSign, torsoY * 0.34, torsoZ * 0.40);
@@ -848,6 +865,51 @@ export class ProceduralAnimator {
     this.setRotation('rightFoot', rightFootX * legForwardAxisSign, rightFootY, rightFootZ);
     this.setRotation('leftToes', leftToeX * legForwardAxisSign, leftToeY, leftFootZ * 0.65);
     this.setRotation('rightToes', rightToeX * legForwardAxisSign, rightToeY, rightFootZ * 0.65);
+  }
+
+  private measureSkirtRestAngles(): { left: number; right: number; leftRadius: number; rightRadius: number; frontDepth: number; backDepth: number; gaitScale: number; lateralGaitScale: number; height: number } | null {
+    if (!this.motionProfile.capabilities.includes('pmx-converted')) return null;
+    const skirtJoints = [...(this.vrm.springBoneManager?.joints ?? [])].filter((joint) =>
+      /skirt|スカート|裙|dress/i.test(joint.bone.name));
+    if (skirtJoints.length < 4) return null;
+    const hips = this.vrm.humanoid.getRawBoneNode(VRMHumanBoneName.Hips);
+    const head = this.vrm.humanoid.getRawBoneNode(VRMHumanBoneName.Head);
+    const foot = this.vrm.humanoid.getRawBoneNode(VRMHumanBoneName.LeftFoot);
+    if (!hips || !head || !foot) return null;
+    this.vrm.scene.updateWorldMatrix(true, true);
+    const point = new THREE.Vector3();
+    const localPoint = (bone: THREE.Object3D): THREE.Vector3 => {
+      bone.getWorldPosition(point);
+      return this.vrm.scene.worldToLocal(point.clone());
+    };
+    const hipsPoint = localPoint(hips);
+    const height = Math.abs(localPoint(head).y - localPoint(foot).y);
+    if (height < 0.5) return null;
+    let leftRadius = 0;
+    let rightRadius = 0;
+    let frontDepth = 0;
+    let backDepth = 0;
+    for (const joint of skirtJoints) {
+      const jointPoint = localPoint(joint.bone);
+      const radialX = jointPoint.x - hipsPoint.x;
+      const radialZ = jointPoint.z - hipsPoint.z;
+      if (radialX > leftRadius) leftRadius = radialX;
+      if (-radialX > rightRadius) rightRadius = -radialX;
+      if (radialZ > frontDepth) frontDepth = radialZ;
+      if (-radialZ > backDepth) backDepth = -radialZ;
+    }
+    if (leftRadius < 0.04 || rightRadius < 0.04) return null;
+    return {
+      left: skirtRestArmAngle(leftRadius, height),
+      right: skirtRestArmAngle(rightRadius, height),
+      leftRadius,
+      rightRadius,
+      frontDepth,
+      backDepth,
+      gaitScale: skirtGaitScale(frontDepth, backDepth, height),
+      lateralGaitScale: skirtLateralGaitScale(leftRadius, rightRadius, height),
+      height,
+    };
   }
 
   private setRotation(bone: string, x: number, y: number, z: number): void {

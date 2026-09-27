@@ -14,18 +14,13 @@
 下载后建议先校验 SHA-256：
 
 ```powershell
-Get-FileHash .\YachiyoDesk-1.0.3-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.3-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.5-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.5-x64-Setup.exe -Algorithm SHA256
 ```
 
 将输出与 Release 中的 `SHA256SUMS.txt` 对比。GitHub 的 `/releases/latest/download/...` 链接会始终指向最新正式 Release，适合脚本或收藏使用。
 
-当前 `v1.0.3` 的校验值如下；任何时候都应以对应 Release 中的 `SHA256SUMS.txt` 为准。
-
-```text
-Portable  5B347887070E897F1968BDE26006DF2DB0508EF221094FC6B6F0DE3A2D3DA1A9
-Setup     EC73D3E8A3B6BE15ED781EAA892F84F057811BBB0DE1A136D797D2A7EFCF1CF4
-```
+不同版本的哈希不同，请下载同一个 Release 附带的 `SHA256SUMS.txt` 对照，不要用旧版哈希校验新版文件。
 
 如果 PowerShell 命令输出不同，不要运行该文件；重新从 Release 下载，或检查下载是否被代理、杀毒软件或浏览器中断。
 
@@ -89,6 +84,8 @@ Test-Path $env:YACHIYO_BLENDER_PATH
 - 模型依赖的 toon 纹理或外部材质文件。
 
 转换失败时，先把模型和纹理放入同一个临时目录，再重试。转换报告会记录骨骼映射、纹理数量、SpringBone 与警告信息。
+
+导入时会检查蒙皮权重。明确的孤立缺权重顶点可自动修复；骨骼边界、没有足够邻居的顶点不会猜测修补。导入成功但还有风险时，程序会提示警告并给出 `conversion-report.json` 路径。可识别的原作者八千代 VRM/PMX 按文件哈希应用专属动作配置，其他模型始终走通用角色逻辑。运行中的网格接触只对可识别且规模在预算内的已转换 PMX 衣物开启，超预算会回退；这不是所有衣物零穿模的承诺。
 
 ### 转换后的质量边界
 
