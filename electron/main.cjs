@@ -19,7 +19,13 @@ const { SettingsStore } = require('./settings.cjs');
 const { switchCharacterScale, rememberCharacterScale } = require('./character-scale.cjs');
 const { calculateDragPosition, clampDragPosition, horizontalWindowRange } = require('./window-drag.cjs');
 const { PMX_CONVERTED_MOTION_PROFILE, sanitizeMotionProfile } = require('./motion-profile.cjs');
-const { convertPmxToVrm, resolvePmxConverter } = require('./pmx-converter.cjs');
+const { convertPmxToVrm, describePmxConversionFailure, resolvePmxConverter } = require('./pmx-converter.cjs');
+const {
+  hashFileSha256,
+  matchRecommendedYachiyo,
+  buildRecommendedYachiyoProfile,
+  verifiedRecommendedImport,
+} = require('./recommended-model.cjs');
 
 // A packaged GUI can outlive the terminal/launcher pipe that started it.
 // Windows then reports EPIPE on console output; without stream listeners that
@@ -270,8 +276,26 @@ function readCharacterManifest(directory, id, builtIn) {
       ...(manifest.messages && typeof manifest.messages === 'object' ? manifest.messages : {}),
     },
     behavior: sanitizeBehaviorProfile(manifest.behavior),
-    motionProfile: sanitizeMotionProfile(manifest.motionProfile, { id, builtIn }),
+    motionProfile: sanitizeMotionProfile(manifest.motionProfile, {
+      id,
+      builtIn,
+      verifiedYachiyo: !builtIn && verifiedRecommendedImport(manifest, path.join(directory, 'model.vrm')),
+    }),
     builtIn,
+  };
+}
+
+function recommendedYachiyoImport(sourcePath, format) {
+  const sourceSha256 = hashFileSha256(sourcePath);
+  const kind = matchRecommendedYachiyo(format, sourceSha256);
+  if (!kind) return null;
+  const author = JSON.parse(fs.readFileSync(path.join(characterRoot(), 'character.json'), 'utf8'));
+  return {
+    kind,
+    sourceSha256,
+    motionProfile: buildRecommendedYachiyoProfile(author.motionProfile, kind),
+    messages: author.messages,
+    behavior: author.behavior,
   };
 }
 
@@ -1349,6 +1373,12 @@ function bindIpc() {
 
   ipcMain.on('window:set-click-through', (_event, ignore) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (IS_MOTION_TEST) {
+      // Physical mouse input during an automated capture can scroll-zoom the
+      // avatar or stop the walk, producing a false growth/foot-motion failure.
+      mainWindow.setIgnoreMouseEvents(true, { forward: false });
+      return;
+    }
     const settings = settingsStore.get();
     mainWindow.setIgnoreMouseEvents(settings.clickThrough && Boolean(ignore), { forward: true });
   });
@@ -1382,6 +1412,7 @@ function bindIpc() {
     try {
       const sourcePath = selection.filePaths[0];
       const metadata = inspectVrmFile(sourcePath);
+      const recommended = recommendedYachiyoImport(sourcePath, 'vrm');
       const rawBase = path.parse(sourcePath).name
         .normalize('NFKD')
         .toLowerCase()
@@ -1401,15 +1432,21 @@ function bindIpc() {
         originalTitle: metadata.displayName,
         creator: metadata.creator,
         sourceFileName: path.basename(sourcePath),
+        sourceFormat: 'vrm',
         model: 'model.vrm',
         credit: `${metadata.displayName} · ${metadata.creator}`,
-        messages: genericMessages(metadata.displayName),
-        behavior: sanitizeBehaviorProfile(),
+        messages: recommended?.messages || genericMessages(metadata.displayName),
+        behavior: recommended?.behavior || sanitizeBehaviorProfile(),
+        ...(recommended ? {
+          sourceSha256: recommended.sourceSha256,
+          modelSha256: recommended.sourceSha256,
+          motionProfile: recommended.motionProfile,
+        } : {}),
       };
       fs.writeFileSync(path.join(directory, 'character.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
       rebuildTrayMenu();
       const character = installedCharacters().find((item) => item.id === id);
-      log('INFO', 'Imported local character', { id, sourceFileName: path.basename(sourcePath) });
+      log('INFO', 'Imported local character', { id, sourceFileName: path.basename(sourcePath), recommendedModel: recommended?.kind || null });
       return { canceled: false, character };
     } catch (error) {
       if (importDirectory && importDirectory.startsWith(`${path.resolve(userCharactersRoot())}${path.sep}`)) {
@@ -1436,6 +1473,7 @@ function bindIpc() {
     let importDirectory = null;
     try {
       const sourcePath = selection.filePaths[0];
+      const recommended = recommendedYachiyoImport(sourcePath, 'pmx');
       const rawBase = path.parse(sourcePath).name
         .normalize('NFKD')
         .toLowerCase()
@@ -1470,9 +1508,13 @@ function bindIpc() {
         sourceFormat: 'pmx',
         model: 'model.vrm',
         credit: `${metadata.displayName} · 本机 PMX 自动转换`,
-        messages: genericMessages(metadata.displayName),
-        behavior: sanitizeBehaviorProfile(),
-        motionProfile: PMX_CONVERTED_MOTION_PROFILE,
+        messages: recommended?.messages || genericMessages(metadata.displayName),
+        behavior: recommended?.behavior || sanitizeBehaviorProfile(),
+        motionProfile: recommended?.motionProfile || PMX_CONVERTED_MOTION_PROFILE,
+        ...(recommended ? {
+          sourceSha256: recommended.sourceSha256,
+          modelSha256: hashFileSha256(outputPath),
+        } : {}),
       };
       fs.writeFileSync(path.join(directory, 'character.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
       rebuildTrayMenu();
@@ -1482,20 +1524,41 @@ function bindIpc() {
         sourceFileName: path.basename(sourcePath),
         armatureBones: conversion.report.armatureBones,
         springBones: conversion.report.springBones,
+        recommendedModel: recommended?.kind || null,
+        skinBindings: conversion.report.skinBindings || null,
       });
-      return { canceled: false, character };
+      const skinWarnings = conversion.report.skinBindings?.warnings || [];
+      return { canceled: false, character, warnings: skinWarnings, diagnosticPath: reportPath };
     } catch (error) {
+      const summary = describePmxConversionFailure(error);
+      const diagnosticsDirectory = path.join(app.getPath('userData'), 'logs');
+      let diagnosticPath = null;
+      try {
+        fs.mkdirSync(diagnosticsDirectory, { recursive: true });
+        diagnosticPath = path.join(diagnosticsDirectory, `pmx-import-${Date.now()}.json`);
+        fs.writeFileSync(diagnosticPath, `${JSON.stringify({
+          summary,
+          source: selection.filePaths[0],
+          report: error?.report || null,
+          stdout: error?.stdout || '',
+          stderr: error?.stderr || '',
+          error: String(error?.stack || error),
+        }, null, 2)}\n`, 'utf8');
+      } catch (logError) {
+        diagnosticPath = null;
+        log('ERROR', 'PMX diagnostic log could not be saved', String(logError));
+      }
       if (importDirectory && importDirectory.startsWith(`${path.resolve(userCharactersRoot())}${path.sep}`)) {
         try { fs.rmSync(importDirectory, { recursive: true, force: true }); } catch { /* best-effort rollback */ }
       }
-      log('ERROR', 'PMX character conversion/import failed', String(error?.stack || error));
+      log('ERROR', 'PMX character conversion/import failed', { summary, diagnosticPath, error: String(error?.stack || error) });
       await dialog.showMessageBox(mainWindow, {
         type: 'error',
         title: 'PMX 导入失败',
-        message: '无法把这个 PMX 转换为可用角色',
-        detail: String(error?.message || error),
+        message: summary,
+        detail: diagnosticPath ? `详细诊断：${diagnosticPath}` : String(error?.message || error),
       });
-      return { canceled: false };
+      return { canceled: false, error: summary, diagnosticPath };
     }
   });
   ipcMain.handle('characters:remove', async (_event, id) => {
@@ -2013,6 +2076,8 @@ async function runMotionTest(details) {
   fs.mkdirSync(artifacts, { recursive: true });
   const screenshots = {};
   const poseSnapshots = {};
+  const secondaryPoseSnapshots = {};
+  mainWindow.setIgnoreMouseEvents(true, { forward: false });
   const requestedCaptureZoom = Number(process.env.YACHIYO_DESK_MOTION_ZOOM);
   if (Number.isFinite(requestedCaptureZoom) && requestedCaptureZoom >= 0.10 && requestedCaptureZoom <= 1.8) {
     patchSettings({ zoom: requestedCaptureZoom });
@@ -2075,6 +2140,7 @@ async function runMotionTest(details) {
     if (!startAutonomousWalk()) throw new Error('Autonomous walk could not find a valid desktop destination.');
     const walkFrames = [];
     const walkPoseFrames = [];
+    const walkSecondaryFrames = [];
     let walkImage = null;
     for (let frameIndex = 0; frameIndex < 5; frameIndex += 1) {
       await new Promise((resolve) => setTimeout(resolve, 240));
@@ -2086,6 +2152,12 @@ async function runMotionTest(details) {
         true,
       );
       walkPoseFrames.push({ elapsedMs: (frameIndex + 1) * 240, pose });
+      walkSecondaryFrames.push({ elapsedMs: (frameIndex + 1) * 240, pose: await mainWindow.webContents.executeJavaScript(
+        'window.__desktopPetSecondarySnapshot?.() ?? null', true,
+      ) });
+      if (process.env.YACHIYO_DESK_CAPTURE_WALK_FRAMES === '1') {
+        fs.writeFileSync(path.join(artifacts, `motion-walk-frame-${frameIndex + 1}.png`), frame.toPNG());
+      }
       if (frameIndex === 2) walkImage = frame;
     }
     if (!walkImage) throw new Error('Autonomous walk did not produce a capture frame.');
@@ -2136,9 +2208,23 @@ async function runMotionTest(details) {
       && walkTest.footMotionRange >= 0.01;
     if (!walkTest.passed) throw new Error(`Autonomous walk did not move the window: ${JSON.stringify(walkTest)}`);
 
+    const greetWaveFrames = [];
     for (const motion of motions) {
       sendCommand('reaction', motion.name);
-      await new Promise((resolve) => setTimeout(resolve, motion.sampleAt * 1000));
+      let elapsedMs = 0;
+      if (motion.name === 'greet' && process.env.YACHIYO_DESK_CAPTURE_GREET_WAVE === '1') {
+        for (let frame = 0; frame < 12; frame += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 160));
+          elapsedMs += 160;
+          greetWaveFrames.push({
+            elapsedMs,
+            pose: await mainWindow.webContents.executeJavaScript(
+              'window.__desktopPetPoseSnapshot?.() ?? null', true,
+            ),
+          });
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, motion.sampleAt * 1000 - elapsedMs)));
       const image = await mainWindow.webContents.capturePage();
       const screenshotPath = path.join(artifacts, `motion-${motion.name}.png`);
       fs.writeFileSync(screenshotPath, image.toPNG());
@@ -2147,10 +2233,27 @@ async function runMotionTest(details) {
         'window.__desktopPetPoseSnapshot?.() ?? null',
         true,
       );
+      secondaryPoseSnapshots[motion.name] = await mainWindow.webContents.executeJavaScript(
+        'window.__desktopPetSecondarySnapshot?.() ?? null', true,
+      );
       await new Promise((resolve) => setTimeout(
         resolve,
         Math.max(250, (motion.duration - motion.sampleAt + 0.25) * 1000),
       ));
+    }
+
+    if (greetWaveFrames.length > 0) {
+      // Test the actual world-space wrist path after the pose has faded in.
+      // A screen-facing greeting should wave vertically, not pump in depth.
+      const waving = greetWaveFrames
+        .filter((frame) => frame.elapsedMs >= 800 && frame.elapsedMs <= 1920)
+        .map((frame) => frame.pose?.rightHand)
+        .filter((hand) => hand && Number.isFinite(hand.y) && Number.isFinite(hand.z));
+      const range = (axis) => Math.max(...waving.map((hand) => hand[axis]))
+        - Math.min(...waving.map((hand) => hand[axis]));
+      if (waving.length < 5 || range('y') < 0.045 || range('z') > range('y') * 0.4) {
+        throw new Error(`Greeting wrist trajectory is not vertical: ${JSON.stringify(greetWaveFrames)}`);
+      }
     }
 
     sendCommand('test-drag', true);
@@ -2168,8 +2271,14 @@ async function runMotionTest(details) {
         timestamp: new Date().toISOString(),
         details,
         telemetry: latestRuntimeTelemetry,
+        garmentContact: await mainWindow.webContents.executeJavaScript(
+          'window.__desktopPetGarmentContactSnapshot?.() ?? null', true,
+        ),
         walkTest,
         poseSnapshots,
+        greetWaveFrames,
+        walkSecondaryFrames,
+        secondaryPoseSnapshots,
         screenshots,
       }, null, 2)}\n`,
       'utf8',
@@ -2187,7 +2296,9 @@ function quitApplication() {
   app.quit();
 }
 
-const gotLock = app.requestSingleInstanceLock();
+// Automated runs use an isolated userData directory and must be able to test
+// the packaged build while the user's normal companion remains open.
+const gotLock = IS_AUTOMATED_TEST ? true : app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {

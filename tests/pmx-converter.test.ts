@@ -5,7 +5,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { resolvePmxConverter, validatePmxSource } = require('../electron/pmx-converter.cjs') as {
+const { describePmxConversionFailure, resolvePmxConverter, validatePmxSource } = require('../electron/pmx-converter.cjs') as {
+  describePmxConversionFailure: (error: { message: string; report?: Record<string, unknown> }) => string;
   resolvePmxConverter: (options: {
     blenderPath?: string;
     scriptPath?: string;
@@ -17,6 +18,20 @@ const { resolvePmxConverter, validatePmxSource } = require('../electron/pmx-conv
 };
 
 describe('PMX conversion boundary', () => {
+  it('reports missing textures and mapping failures rather than a generic export error', () => {
+    expect(describePmxConversionFailure({
+      message: 'PMX conversion failed',
+      report: { stage: 'pmx-import', missingTextures: [{ expected: 'C:\\model\\TEX\\cloth.png' }] },
+    })).toContain('cloth.png');
+    expect(describePmxConversionFailure({
+      message: 'PMX conversion failed',
+      report: { stage: 'humanoid-mapping', error: 'Missing leftLowerLeg' },
+    })).toContain('Missing leftLowerLeg');
+    expect(describePmxConversionFailure({
+      message: 'PMX conversion failed',
+      report: { stage: 'vrm-export', error: 'VRM export failed: CANCELLED' },
+    })).toContain('VRM 导出失败');
+  });
   it('accepts only a real PMX 2.x header and rejects renamed files', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yachiyo-pmx-'));
     try {

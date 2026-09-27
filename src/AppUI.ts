@@ -42,7 +42,7 @@ const GENERAL_TOGGLES: ToggleDefinition[] = [
 ];
 
 const ACTIONS: Array<{ reaction: ReactionName; icon: string; label: string; description: string; speechKey?: string }> = [
-  { reaction: 'think', icon: '✧', label: '八千代的话', description: '听听八千代安静而温柔的心声', speechKey: 'characterChat' },
+  { reaction: 'think', icon: '✧', label: '角色的话', description: '听听当前角色的心声', speechKey: 'characterChat' },
   { reaction: 'lookAround', icon: '…', label: '闲聊', description: '边观察桌面边说几句话', speechKey: 'idleChat' },
   { reaction: 'greet', icon: '✦', label: '打招呼', description: '轻快招呼与挥手反应' },
   { reaction: 'joy', icon: '♡', label: '开心', description: '笑容与活泼摆动' },
@@ -109,6 +109,7 @@ export class AppUI {
     this.settings = settings;
     this.character = character;
     this.callbacks = callbacks;
+    document.querySelector<HTMLElement>('#dock-character-name')!.textContent = character.displayName;
     document.querySelector('#settings-close')?.addEventListener('click', () => this.hideSettings());
     document.querySelector('#reset-pose')?.addEventListener('click', callbacks.onResetPose);
     document.querySelector('#reset-window')?.addEventListener('click', callbacks.onResetWindow);
@@ -647,7 +648,10 @@ export class AppUI {
       try {
         const result = await window.yachiyoDesk.importPmxCharacter();
         if (result.canceled) return;
-        this.showToast(result.character ? `已转换并导入 ${result.character.displayName}` : '转换未完成');
+        this.showToast(result.character ? `已转换并导入 ${result.character.displayName}` : result.error || '转换未完成');
+        if (result.warnings?.length) {
+          window.alert(`PMX 已导入，但蒙皮检查发现无法安全自动修复的问题：\n${result.warnings.join('\n')}\n\n详细报告：${result.diagnosticPath || '请打开数据目录查看 conversion-report.json'}`);
+        }
         await this.refreshCharacters();
       } catch (error) {
         this.showToast(error instanceof Error ? error.message : 'PMX 转换失败');
