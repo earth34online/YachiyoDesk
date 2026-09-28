@@ -367,10 +367,12 @@ export class ProceduralAnimator {
     let rightShoulderZ = -0.025 - breath * 0.25;
     let leftArmX = 0.025;
     let leftArmY = 0.025;
-    let leftArmZ = 1.16 + weightShift * 0.7;
+    // Use the final garment-aware rest pose throughout gesture fade-out. A
+    // late idle-only override made the arm visit 1.16 first, then jump to rest.
+    let leftArmZ = this.skirtRestAngles?.left ?? (1.16 + weightShift * 0.7);
     let rightArmX = 0.025;
     let rightArmY = -0.025;
-    let rightArmZ = -1.16 + weightShift * 0.7;
+    let rightArmZ = this.skirtRestAngles ? -this.skirtRestAngles.right : -1.16 + weightShift * 0.7;
     let leftLowerX = -0.14;
     let leftLowerY = 0.045;
     // Keep the relaxed elbow bend on the forward/back axis. Sideways Z bends
@@ -426,18 +428,22 @@ export class ProceduralAnimator {
       // This independent gait request must survive cloth experiment rollbacks.
       // Only converted PMX imports opt in; built-in/direct VRM motion is intact.
       const convertedPmx = this.motionProfile.capabilities.includes('pmx-converted');
+      const leftGait = convertedPmx ? legGait(walkPhase) : null;
+      const rightGait = convertedPmx ? legGait(walkPhase + Math.PI) : null;
+      // PMX thighs follow the contact gait's cosine, not the legacy sine.
+      // Use the actual thigh direction (including its axis conversion) so
+      // the same-side arm counter-swings, as in the existing VRM walk.
+      const armStride = leftGait ? leftGait.thigh * legForwardAxisSign : stride;
       const armSwing = convertedPmx ? 0.29 : 0.18;
       const elbowSwing = convertedPmx ? 0.22 : 0.15;
-      leftArmX += -stride * armSwing * walk * walkTuning.armSwingScale;
-      rightArmX += stride * armSwing * walk * walkTuning.armSwingScale;
-      leftLowerX += Math.max(0, stride) * elbowSwing * walk * walkTuning.armSwingScale;
-      rightLowerX += Math.max(0, -stride) * elbowSwing * walk * walkTuning.armSwingScale;
+      leftArmX += -armStride * armSwing * walk * walkTuning.armSwingScale;
+      rightArmX += armStride * armSwing * walk * walkTuning.armSwingScale;
+      leftLowerX += Math.max(0, armStride) * elbowSwing * walk * walkTuning.armSwingScale;
+      rightLowerX += Math.max(0, -armStride) * elbowSwing * walk * walkTuning.armSwingScale;
       // The x axis is the humanoid forward/back axis. Keep the two thighs
       // strictly opposite in phase so one leg advances while the other trails;
       // this is the part that must remain visible even when a skirt covers the
       // knees. The amplitudes are intentionally shared by all imported rigs.
-      const leftGait = convertedPmx ? legGait(walkPhase) : null;
-      const rightGait = convertedPmx ? legGait(walkPhase + Math.PI) : null;
       const skirtGait = this.skirtRestAngles?.gaitScale ?? 1;
       leftUpperLegX += (leftGait?.thigh ?? stride) * 0.56 * walk * walkTuning.strideScale * skirtGait;
       rightUpperLegX += (rightGait?.thigh ?? -stride) * 0.56 * walk * walkTuning.strideScale * skirtGait;
@@ -448,9 +454,14 @@ export class ProceduralAnimator {
       // A small outward support offset preserves each foot's landing side
       // while the forward/back hinge is active; it fades with walkWeight and
       // is therefore invisible in idle or reactions.
-      const lateralClearance = Math.min(skirtGait, this.skirtRestAngles?.lateralGaitScale ?? 1);
-      leftUpperLegZ += 0.09 * walk * walkTuning.strideScale * lateralClearance;
-      rightUpperLegZ -= 0.09 * walk * walkTuning.strideScale * lateralClearance;
+      // Do not splay PMX thighs as a substitute for clearance. Combining
+      // abduction with pitch turns the feet outward during each step. Their
+      // authored hip spacing already separates the two sagittal leg chains.
+      // Preserve the existing built-in/direct-VRM gait exactly.
+      if (!convertedPmx) {
+        leftUpperLegZ += 0.09 * walk * walkTuning.strideScale;
+        rightUpperLegZ -= 0.09 * walk * walkTuning.strideScale;
+      }
       leftKneeX += (leftGait?.knee ?? leftSwing) * 0.90 * walk * walkTuning.kneeLiftScale * skirtGait;
       rightKneeX += (rightGait?.knee ?? rightSwing) * 0.90 * walk * walkTuning.kneeLiftScale * skirtGait;
       // Ankle pitch is opposite during swing and stance; the toe joint adds
@@ -828,15 +839,6 @@ export class ProceduralAnimator {
       rightUpperLegX += Math.max(0, step) * 0.16 * active;
       leftKneeX += Math.max(0, step) * 0.22 * active;
       rightKneeX += Math.max(0, -step) * 0.22 * active;
-    }
-
-    // At rest, position the hands beside the imported skirt's *measured*
-    // radius. A fixed wide-skirt pose held narrow-skirt hands far from clothing;
-    // a fixed narrow-skirt pose buried hands in bell skirts. Gestures and the
-    // built-in/direct-VRM paths retain their existing motion targets.
-    if (this.skirtRestAngles && !reaction && this.draggingWeight < 0.01) {
-      leftArmZ = this.skirtRestAngles.left;
-      rightArmZ = -this.skirtRestAngles.right;
     }
 
     this.setPosition('hips', hipsX, hipsY, hipsZ * rootDepthAxisSign);

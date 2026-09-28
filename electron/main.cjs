@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { SettingsStore } = require('./settings.cjs');
 const { switchCharacterScale, rememberCharacterScale } = require('./character-scale.cjs');
-const { calculateDragPosition, clampDragPosition, horizontalWindowRange } = require('./window-drag.cjs');
+const { calculateDragPosition, clampDragPosition, horizontalWindowRange, planGenericWalk } = require('./window-drag.cjs');
 const { PMX_CONVERTED_MOTION_PROFILE, sanitizeMotionProfile } = require('./motion-profile.cjs');
 const { convertPmxToVrm, describePmxConversionFailure, resolvePmxConverter } = require('./pmx-converter.cjs');
 const {
@@ -904,33 +904,42 @@ function startAutonomousWalk() {
   const displayBounds = currentDisplay.bounds;
   const horizontal = horizontalWindowRange(displayBounds, bounds.width, avatarViewportBounds);
   if (!horizontal) return false;
+  const motionProfile = activeCharacterRecord().manifest.motionProfile;
+  const generic = motionProfile.profileId === 'generic-vrm';
   const { minimumX, maximumX } = horizontal;
-  if (maximumX - minimumX < 100) return false;
+  if (maximumX - minimumX < (generic ? 1 : 100)) return false;
 
   let direction = settings.wanderMode === 'random'
     ? (Math.random() < 0.5 ? -1 : 1)
     : patrolDirection;
-  if (bounds.x <= minimumX + 80) direction = 1;
-  if (bounds.x >= maximumX - 80) direction = -1;
-  if (settings.wanderMode === 'patrol') patrolDirection = direction;
+  if (!generic) {
+    if (bounds.x <= minimumX + 80) direction = 1;
+    if (bounds.x >= maximumX - 80) direction = -1;
+  }
   const available = direction > 0 ? maximumX - bounds.x : bounds.x - minimumX;
-  const distance = Math.min(available, randomRange(
+  const requestedDistance = randomRange(
     settings.wanderMode === 'patrol' ? 280 : 180,
     settings.wanderMode === 'patrol' ? 500 : 520,
-  ));
-  if (distance < 70) return false;
+  );
+  let distance = Math.min(available, requestedDistance);
+  let startX = bounds.x;
+  let targetX = Math.round(startX + direction * distance);
+  if (generic) {
+    const plan = planGenericWalk(bounds.x, horizontal, direction, requestedDistance);
+    if (!plan || plan.distance < 1) return false;
+    ({ startX, targetX, distance, direction } = plan);
+  } else if (distance < 70) return false;
+  if (settings.wanderMode === 'patrol') patrolDirection = direction;
 
   const floorY = Math.round(displayBounds.y + displayBounds.height - bounds.height);
   if (bounds.y !== floorY) {
     mainWindow.setBounds({ x: bounds.x, y: floorY, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }, false);
   }
-  const startX = bounds.x;
   const startY = floorY;
-  const targetX = Math.round(startX + direction * distance);
   const targetY = startY;
-  const motionProfile = activeCharacterRecord().manifest.motionProfile;
+  const reachesEdge = generic && (targetX === minimumX || targetX === maximumX);
   const effectiveSpeed = Math.max(12, settings.wanderSpeed * motionProfile.walk.speedScale);
-  const durationMs = Math.max(3200, distance / effectiveSpeed * 1000);
+  const durationMs = Math.max(generic ? 200 : 3200, distance / effectiveSpeed * 1000);
   const startedAt = Date.now();
   autonomyMove = {
     startX,
@@ -963,7 +972,11 @@ function startAutonomousWalk() {
     }
     const progress = Math.min(1, (Date.now() - autonomyMove.startedAt) / autonomyMove.durationMs);
     const eased = 0.5 - Math.cos(progress * Math.PI) * 0.5;
-    const x = Math.round(autonomyMove.startX + (autonomyMove.targetX - autonomyMove.startX) * eased);
+    let x = Math.round(autonomyMove.startX + (autonomyMove.targetX - autonomyMove.startX) * eased);
+    if (generic) {
+      const currentRange = horizontalWindowRange(displayBounds, DEFAULT_WIDTH, avatarViewportBounds);
+      if (currentRange) x = Math.min(currentRange.maximumX, Math.max(currentRange.minimumX, x));
+    }
     const y = autonomyMove.startY;
     const [currentX, currentY] = mainWindow.getPosition();
     if (x !== currentX || y !== currentY) {
@@ -1008,7 +1021,10 @@ function startAutonomousWalk() {
       stopAutonomousMovement();
       lastAutonomousAction = 'walk';
       walksSinceInterlude += 1;
-      if (settingsStore.get().wanderMode === 'patrol') patrolDirection = direction;
+      // Latch the turn when this walk reaches its measured destination. Idle
+      // and walking silhouettes differ by a few pixels; rechecking only the
+      // narrower idle pose otherwise causes repeated one-pixel edge walks.
+      if (settingsStore.get().wanderMode === 'patrol') patrolDirection = reachesEdge ? -direction : direction;
       if (walksSinceInterlude >= nextInterludeAfterWalks) runAutonomousInterlude();
       else scheduleAutonomy(randomRange(320, 760));
     }

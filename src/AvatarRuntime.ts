@@ -11,6 +11,7 @@ import { clamp, damp, nextAdaptiveScale, normalizedPointer } from './math';
 import { ProceduralAnimator } from './ProceduralAnimator';
 import { shouldCombineSkeletons } from './skin-policy';
 import { GarmentContactSolver } from './garmentContact';
+import { alphaFootprint } from './avatar-footprint';
 import type {
   AppSettings,
   AvatarViewportBounds,
@@ -29,6 +30,7 @@ interface RuntimeCallbacks {
   onReady: (diagnostics: RuntimeDiagnostics) => void;
   onFatal: (error: Error) => void;
   onSetupRequired?: () => void;
+  onViewportBounds?: (bounds: AvatarViewportBounds) => void;
 }
 
 type UpdatableMaterial = THREE.Material & { update?: (delta: number) => void };
@@ -66,6 +68,13 @@ export class AvatarRuntime {
   private started = false;
   private disposed = false;
   private diagnosticBindPose = false;
+  private footprintTarget: THREE.WebGLRenderTarget | null = null;
+  private footprintPixels = new Uint8Array(0);
+  private renderedFootprint: AvatarViewportBounds | null = null;
+  private footprintZoom = 0;
+  private footprintPending = false;
+  private nextFootprintAt = 0;
+  private footprintFailed = false;
 
   constructor(canvas: HTMLCanvasElement, bootstrap: BootstrapData, callbacks: RuntimeCallbacks) {
     this.canvas = canvas;
@@ -160,6 +169,14 @@ export class AvatarRuntime {
       vrm.springBoneManager?.setInitState();
       this.callbacks.onProgress(94, '启动表情、视线与摇摆骨骼…');
 
+      // Measure the posed avatar before anchoring its first window at the edge.
+      // Never feed animated bounds back into camera fitting or window size.
+      if (this.usesRenderedFootprint()) {
+        this.animator.update(0);
+        this.updateVrm(0);
+        await this.measureRenderedFootprint();
+      }
+
       this.started = true;
       this.renderer.setAnimationLoop((timestamp) => this.renderFrame(timestamp));
       this.callbacks.onProgress(100, '角色已准备好');
@@ -171,7 +188,7 @@ export class AvatarRuntime {
     }
   }
 
-  humanoidPoseSnapshot(): Record<string, { x: number; y: number; z: number; rx: number; ry: number; rz: number }> {
+  humanoidPoseSnapshot(localSpace = false): Record<string, { x: number; y: number; z: number; rx: number; ry: number; rz: number }> {
     if (!this.vrm) return {};
     const positions: Record<string, { x: number; y: number; z: number; rx: number; ry: number; rz: number }> = {};
     const point = new THREE.Vector3();
@@ -191,6 +208,7 @@ export class AvatarRuntime {
       const node = this.vrm.humanoid.getRawBoneNode(bone);
       if (!node) continue;
       node.getWorldPosition(point);
+      if (localSpace) this.avatarPivot.worldToLocal(point);
       positions[bone] = {
         x: Number(point.x.toFixed(4)),
         y: Number(point.y.toFixed(4)),
@@ -352,6 +370,9 @@ export class AvatarRuntime {
   avatarViewportBounds(): AvatarViewportBounds {
     const canvasWidth = Math.max(1, this.canvas.clientWidth || window.innerWidth);
     if (!this.vrm) return { left: 0, right: canvasWidth, canvasWidth };
+    if (this.usesRenderedFootprint() && this.renderedFootprint
+      && this.renderedFootprint.canvasWidth === canvasWidth
+      && this.footprintZoom === this.settings.zoom) return this.renderedFootprint;
 
     // Project the neutral mesh footprint for the current user rotation plus
     // either walking direction. This deliberately does not refit the camera or
@@ -401,6 +422,7 @@ export class AvatarRuntime {
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
     this.garmentContact?.dispose();
+    this.footprintTarget?.dispose();
     if (this.vrm) VRMUtils.deepDispose(this.vrm.scene);
     this.shadow.geometry.dispose();
     (this.shadow.material as THREE.Material).dispose();
@@ -587,8 +609,63 @@ export class AvatarRuntime {
     this.currentRotationY = damp(this.currentRotationY, this.targetRotationY + this.autonomyFacing, 8.5, delta);
     this.avatarPivot.rotation.y = this.currentRotationY;
     this.updateVrm(delta);
+    if (this.usesRenderedFootprint() && timestamp >= this.nextFootprintAt) {
+      this.nextFootprintAt = timestamp + 250;
+      void this.measureRenderedFootprint();
+    }
     this.renderer.render(this.scene, this.camera);
     this.assessAdaptivePerformance(timestamp);
+  }
+
+  private usesRenderedFootprint(): boolean {
+    return this.bootstrap.character.motionProfile.profileId === 'generic-vrm';
+  }
+
+  private async measureRenderedFootprint(): Promise<void> {
+    if (this.disposed || this.footprintPending || this.footprintFailed) return;
+    this.footprintPending = true;
+    const width = Math.max(1, this.canvas.clientWidth || window.innerWidth);
+    const height = Math.max(1, this.canvas.clientHeight || window.innerHeight);
+    const zoom = this.settings.zoom;
+    const sampleWidth = 256;
+    const sampleHeight = Math.max(1, Math.round(sampleWidth * height / width));
+    if (!this.footprintTarget) this.footprintTarget = new THREE.WebGLRenderTarget(sampleWidth, sampleHeight);
+    if (this.footprintTarget.height !== sampleHeight) this.footprintTarget.setSize(sampleWidth, sampleHeight);
+    if (this.footprintPixels.length !== sampleWidth * sampleHeight * 4) {
+      this.footprintPixels = new Uint8Array(sampleWidth * sampleHeight * 4);
+    }
+    const previousTarget = this.renderer.getRenderTarget();
+    const shadowVisible = this.shadow.visible;
+    try {
+      this.shadow.visible = false;
+      this.renderer.setRenderTarget(this.footprintTarget);
+      this.renderer.render(this.scene, this.camera);
+      this.renderer.setRenderTarget(previousTarget);
+      this.shadow.visible = shadowVisible;
+      // PBO + GPU fence in Three.js: no synchronous gl.readPixels stall.
+      await this.renderer.readRenderTargetPixelsAsync(
+        this.footprintTarget, 0, 0, sampleWidth, sampleHeight, this.footprintPixels,
+      );
+      if (this.disposed || width !== this.canvas.clientWidth || height !== this.canvas.clientHeight
+        || zoom !== this.settings.zoom) return;
+      const next = alphaFootprint(this.footprintPixels, sampleWidth, sampleHeight, width);
+      if (!next) return; // Keep the conservative fallback for a blank render.
+      const previous = this.renderedFootprint;
+      this.renderedFootprint = next;
+      this.footprintZoom = zoom;
+      if (this.started && (previous?.left !== next.left || previous?.right !== next.right
+        || previous?.canvasWidth !== next.canvasWidth)) this.callbacks.onViewportBounds?.(next);
+    } catch (error) {
+      if (!this.disposed) {
+        this.footprintFailed = true;
+        console.warn('Avatar footprint readback failed; keeping conservative bounds.', error);
+      }
+    } finally {
+      // Restore before the normal onscreen render, even on shader/read errors.
+      if (!this.disposed) this.renderer.setRenderTarget(previousTarget);
+      this.shadow.visible = shadowVisible;
+      this.footprintPending = false;
+    }
   }
 
   private updateVrm(delta: number): void {

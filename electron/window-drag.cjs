@@ -83,4 +83,20 @@ function clampDragPosition(position, displayBounds, windowSize, viewportBounds) 
   };
 }
 
-module.exports = { calculateDragPosition, clampDragPosition, horizontalWindowRange };
+// Generic characters turn at the actual visible edge, not a fixed inset.
+function planGenericWalk(x, horizontal, direction, requestedDistance) {
+  if (!horizontal || ![x, horizontal.minimumX, horizontal.maximumX, requestedDistance].every(Number.isFinite)
+    || horizontal.maximumX - horizontal.minimumX < 1 || requestedDistance <= 0) return null;
+  const startX = Math.min(horizontal.maximumX, Math.max(horizontal.minimumX, x));
+  let resolvedDirection = direction === -1 ? -1 : 1;
+  let available = resolvedDirection > 0 ? horizontal.maximumX - startX : startX - horizontal.minimumX;
+  if (available < 1) {
+    resolvedDirection *= -1;
+    available = resolvedDirection > 0 ? horizontal.maximumX - startX : startX - horizontal.minimumX;
+  }
+  if (available < 1) return null;
+  const targetX = Math.round(startX + resolvedDirection * Math.min(available, requestedDistance));
+  return { startX, targetX, direction: resolvedDirection, distance: Math.abs(targetX - startX) };
+}
+
+module.exports = { calculateDragPosition, clampDragPosition, horizontalWindowRange, planGenericWalk };

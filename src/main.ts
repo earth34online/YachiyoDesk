@@ -62,6 +62,7 @@ runtime = new AvatarRuntime(canvas, bootstrap, {
     window.yachiyoDesk.runtimeError({ message: error.message, stack: error.stack });
   },
   onSetupRequired: () => ui.showSetupRequired(),
+  onViewportBounds: (bounds) => window.yachiyoDesk.runtimeViewportBounds(bounds),
 });
 
 interaction = new InteractionController(canvas, runtime, ui, currentSettings);
@@ -71,8 +72,12 @@ document.querySelector<HTMLButtonElement>('#setup-open-characters')?.addEventLis
 if (bootstrap.smokeTest) {
   Object.assign(window as unknown as Record<string, unknown>, {
     __desktopPetPoseSnapshot: () => runtime.humanoidPoseSnapshot(),
+    __desktopPetLocalPoseSnapshot: () => runtime.humanoidPoseSnapshot(true),
+    __desktopPetSetAutonomy: (command: AutonomyCommand) => runtime.setAutonomy(command),
     __desktopPetSecondarySnapshot: () => runtime.secondaryPoseSnapshot(),
     __desktopPetGarmentContactSnapshot: () => runtime.garmentContactSnapshot(),
+    __desktopPetViewportBounds: () => runtime.avatarViewportBounds(),
+    __desktopPetPerformance: () => runtime.getPerformanceStats(),
     __desktopPetBindPose: (active: boolean) => runtime.setDiagnosticBindPose(active),
   });
 }

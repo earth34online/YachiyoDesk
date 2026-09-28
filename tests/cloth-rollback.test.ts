@@ -36,6 +36,9 @@ describe('scope of the cancelled cloth softness work',()=>{
     const expected=new THREE.Vector3(),actual=new THREE.Vector3();
     // Repeated changing arm poses exposed lag/sag in the cancelled PBD pass.
     for(let frame=0;frame<20;frame++){
+      scene.position.set(.3+frame*.02, .2, -.4);
+      scene.rotation.set(.05, frame*.01, -.04);
+      scene.scale.set(.91, 1.1, 1.03);
       bone.rotation.z=Math.sin(frame*.3)*.9; scene.updateMatrixWorld(true);
       solver.update(1/60);
       for(let i=0;i<display.geometry.attributes.position.count;i++){

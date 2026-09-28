@@ -62,8 +62,8 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 打开 [Releases](https://github.com/earth34online/YachiyoDesk/releases/latest)，在 **Assets** 区域选择一个版本：
 
-- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.5-x64-Portable.exe)：下载后直接运行，不写入安装目录。
-- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.5-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
+- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.6-x64-Portable.exe)：下载后直接运行，不写入安装目录。
+- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.6-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
 - [`SHA256SUMS.txt`](https://github.com/earth34online/YachiyoDesk/releases/latest/download/SHA256SUMS.txt)：校验下载文件完整性。
 
 下载后的操作顺序：
@@ -80,23 +80,23 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 $dir = Join-Path $env:USERPROFILE 'Downloads\YachiyoDesk'
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
 $base = 'https://github.com/earth34online/YachiyoDesk/releases/latest/download'
-Invoke-WebRequest "$base/YachiyoDesk-1.0.5-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.5-x64-Portable.exe')
-Invoke-WebRequest "$base/YachiyoDesk-1.0.5-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.5-x64-Setup.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.6-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.6-x64-Portable.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.6-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.6-x64-Setup.exe')
 Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $dir 'SHA256SUMS.txt')
 Set-Location $dir
-Get-FileHash .\YachiyoDesk-1.0.5-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.5-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.6-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.6-x64-Setup.exe -Algorithm SHA256
 ```
 
 确认哈希与 `SHA256SUMS.txt` 一致后运行其一：
 
 ```powershell
-Start-Process .\YachiyoDesk-1.0.5-x64-Portable.exe
+Start-Process .\YachiyoDesk-1.0.6-x64-Portable.exe
 # 或者
-Start-Process .\YachiyoDesk-1.0.5-x64-Setup.exe
+Start-Process .\YachiyoDesk-1.0.6-x64-Setup.exe
 ```
 
-`/releases/latest` 页面地址固定指向最新正式版本；Release asset 的文件名包含版本号，因此脚本中的 `1.0.5` 需要在下一次正式发布时同步更新。
+`/releases/latest` 页面地址固定指向最新正式版本；Release asset 的文件名包含版本号，因此脚本中的 `1.0.6` 需要在下一次正式发布时同步更新。
 
 首次公开版启动时不会内置八千代模型。请点击“打开角色库并导入”，导入你有权使用的 `.vrm`，或导入 `.pmx` 让本机转换器生成 VRM；之后在角色库中点击“使用”。模型会保存在 `%APPDATA%\YachiyoDesk\characters`，下次启动会自动使用已选择的角色。新导入角色首次启用时按 35% 显示；之后每个角色分别记住手动调整的比例，不会覆盖八千代已有的比例。透明置顶窗口和开机启动设置可在面板中调整。
 

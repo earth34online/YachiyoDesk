@@ -14,8 +14,8 @@
 下载后建议先校验 SHA-256：
 
 ```powershell
-Get-FileHash .\YachiyoDesk-1.0.5-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.5-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.6-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.6-x64-Setup.exe -Algorithm SHA256
 ```
 
 将输出与 Release 中的 `SHA256SUMS.txt` 对比。GitHub 的 `/releases/latest/download/...` 链接会始终指向最新正式 Release，适合脚本或收藏使用。

@@ -111,6 +111,7 @@ export class GarmentContactSolver {
   private enabled = false;
   private samples = 0;
   private slowFrames = 0;
+  private readonly displayWorldInverse = new THREE.Matrix4();
 
   private constructor(body: THREE.SkinnedMesh, garmentMeshes: THREE.SkinnedMesh[]) {
     this.body = body;
@@ -207,7 +208,6 @@ export class GarmentContactSolver {
   update(delta: number): void {
     if (!this.enabled) return;
     const started = performance.now();
-    this.body.updateWorldMatrix(true, false);
     this.updateBodyGeometry();
     this.bodyBvh.refit();
     void delta;
@@ -241,9 +241,11 @@ export class GarmentContactSolver {
         contacts += 1;
       }
       const output = garment.display.geometry.attributes.position as THREE.BufferAttribute;
+      // Matrix is constant within this pass. worldToLocal() otherwise walks
+      // and recomputes the entire ancestor chain for every garment vertex.
+      this.displayWorldInverse.copy(garment.display.matrixWorld).invert();
       for (let i = 0; i < garment.vertexCount; i += 1) {
-        this.scratch.copy(garment.positions[i]);
-        garment.display.worldToLocal(this.scratch);
+        this.scratch.copy(garment.positions[i]).applyMatrix4(this.displayWorldInverse);
         output.setXYZ(i, this.scratch.x, this.scratch.y, this.scratch.z);
       }
       output.needsUpdate = true;
@@ -261,9 +263,11 @@ export class GarmentContactSolver {
   }
 
   private updateBodyGeometry(): void {
+    this.body.updateWorldMatrix(true, false);
     for (let i = 0; i < this.bodyPosition.count; i += 1) {
       this.body.getVertexPosition(i, this.scratch);
-      this.body.localToWorld(this.scratch);
+      // Refresh once above, including the constructor's initial BVH build.
+      this.scratch.applyMatrix4(this.body.matrixWorld);
       this.bodyPosition.setXYZ(i, this.scratch.x, this.scratch.y, this.scratch.z);
     }
     this.bodyPosition.needsUpdate = true;
