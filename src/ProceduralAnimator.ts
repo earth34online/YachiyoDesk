@@ -423,15 +423,19 @@ export class ProceduralAnimator {
       torsoZ += -side * 1.7;
       headY += this.autonomousDirection * 0.10 * walk + stride * 0.018 * walk * walkTuning.strideScale;
       headZ += side * 1.15;
-      leftArmX += -stride * 0.18 * walk * walkTuning.armSwingScale;
-      rightArmX += stride * 0.18 * walk * walkTuning.armSwingScale;
-      leftLowerX += Math.max(0, stride) * 0.15 * walk * walkTuning.armSwingScale;
-      rightLowerX += Math.max(0, -stride) * 0.15 * walk * walkTuning.armSwingScale;
+      // This independent gait request must survive cloth experiment rollbacks.
+      // Only converted PMX imports opt in; built-in/direct VRM motion is intact.
+      const convertedPmx = this.motionProfile.capabilities.includes('pmx-converted');
+      const armSwing = convertedPmx ? 0.29 : 0.18;
+      const elbowSwing = convertedPmx ? 0.22 : 0.15;
+      leftArmX += -stride * armSwing * walk * walkTuning.armSwingScale;
+      rightArmX += stride * armSwing * walk * walkTuning.armSwingScale;
+      leftLowerX += Math.max(0, stride) * elbowSwing * walk * walkTuning.armSwingScale;
+      rightLowerX += Math.max(0, -stride) * elbowSwing * walk * walkTuning.armSwingScale;
       // The x axis is the humanoid forward/back axis. Keep the two thighs
       // strictly opposite in phase so one leg advances while the other trails;
       // this is the part that must remain visible even when a skirt covers the
       // knees. The amplitudes are intentionally shared by all imported rigs.
-      const convertedPmx = this.motionProfile.capabilities.includes('pmx-converted');
       const leftGait = convertedPmx ? legGait(walkPhase) : null;
       const rightGait = convertedPmx ? legGait(walkPhase + Math.PI) : null;
       const skirtGait = this.skirtRestAngles?.gaitScale ?? 1;

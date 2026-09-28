@@ -7,8 +7,8 @@ import type { MotionProfile } from './types';
  * A bounded, opt-in mesh-contact pass for converted PMX garments.
  *
  * The source skin and materials stay intact. A CPU-skinned render copy of each
- * clearly named skirt/sleeve receives small PBD-style stretch/bend corrections
- * and contacts against a *posed triangle mesh* of the body. Unsupported or
+ * clearly named skirt/sleeve receives contacts against a *posed triangle mesh*
+ * of the body, with no extra cloth gravity, inertia or stretch simulation. Unsupported or
  * expensive assets keep the existing spring-bone renderer unchanged.
  */
 const GARMENT_NAME = /skirt|dress|スカート|裙|sleeves?|袖/i;
@@ -17,7 +17,6 @@ const MAX_GARMENT_VERTICES = 2400;
 const MAX_BODY_VERTICES = 6500;
 const CONTACT_MARGIN = 0.0035;
 const CONTACT_SEARCH = 0.09;
-const MAX_TRAVEL = 0.065;
 
 interface Link { a: number; b: number; rest: number; stiffness: number }
 
@@ -25,8 +24,6 @@ interface GarmentMesh {
   source: THREE.SkinnedMesh;
   display: THREE.Mesh;
   positions: THREE.Vector3[];
-  previous: THREE.Vector3[];
-  targets: THREE.Vector3[];
   pinned: boolean[];
   links: Link[];
   index: THREE.BufferAttribute;
@@ -112,7 +109,6 @@ export class GarmentContactSolver {
   private readonly b = new THREE.Vector3();
   private readonly c = new THREE.Vector3();
   private enabled = false;
-  private initialized = false;
   private samples = 0;
   private slowFrames = 0;
 
@@ -155,8 +151,6 @@ export class GarmentContactSolver {
         source,
         display,
         positions,
-        previous: positions.map((p) => p.clone()),
-        targets: positions.map((p) => p.clone()),
         pinned: positions.map((p) => p.y >= top - (top - bottom) * 0.17),
         links,
         index,
@@ -204,11 +198,10 @@ export class GarmentContactSolver {
       garment.source.visible = !this.enabled;
       garment.display.visible = this.enabled;
     }
-    if (this.enabled) this.initialized = false;
   }
 
   reset(): void {
-    this.initialized = false;
+    // Each frame starts from the original posed skin; no cloth state to reset.
   }
 
   update(delta: number): void {
@@ -217,52 +210,23 @@ export class GarmentContactSolver {
     this.body.updateWorldMatrix(true, false);
     this.updateBodyGeometry();
     this.bodyBvh.refit();
-    const dt = THREE.MathUtils.clamp(delta, 1 / 120, 1 / 30);
+    void delta;
     let contacts = 0;
     for (const garment of this.garments) {
       garment.source.updateWorldMatrix(true, false);
       garment.display.updateWorldMatrix(true, false);
       for (let i = 0; i < garment.vertexCount; i += 1) {
         garment.source.getVertexPosition(i, this.scratch);
-        garment.targets[i].copy(this.scratch).applyMatrix4(garment.source.matrixWorld);
-        if (!this.initialized || garment.pinned[i]
-          || garment.positions[i].distanceToSquared(garment.targets[i]) > 0.04) {
-          garment.positions[i].copy(garment.targets[i]);
-          garment.previous[i].copy(garment.targets[i]);
-          continue;
-        }
-        const previous = garment.previous[i];
-        const position = garment.positions[i];
-        this.scratch.copy(position);
-        position.add(this.a.subVectors(position, previous).multiplyScalar(0.89));
-        position.y -= 2.8 * dt * dt;
-        position.lerp(garment.targets[i], 0.19);
-        previous.copy(this.scratch);
+        // Preserve authored skin and spring poses. The cancelled softness
+        // experiment must not retain independent material-piece motion here.
+        garment.positions[i].copy(this.scratch).applyMatrix4(garment.source.matrixWorld);
       }
-      // Two contact-aware passes keep the final cloth outside the posed body
-      // while avoiding four expensive closest-triangle queries per vertex.
-      // The extra passes were unnecessary for the tested PMX garments and
-      // pushed multi-piece outfits beyond the frame budget.
+      // Retain the pre-existing body contact pass, without pulling the result
+      // back toward a separate cloth simulation or stretching material seams.
       for (let iteration = 0; iteration < 2; iteration += 1) {
-        for (const link of garment.links) {
-          const left = garment.positions[link.a];
-          const right = garment.positions[link.b];
-          const distance = left.distanceTo(right);
-          if (distance < 1e-7) continue;
-          const leftWeight = garment.pinned[link.a] ? 0 : 1;
-          const rightWeight = garment.pinned[link.b] ? 0 : 1;
-          const sum = leftWeight + rightWeight;
-          if (!sum) continue;
-          this.scratch.subVectors(right, left).multiplyScalar((distance - link.rest) * link.stiffness / (distance * sum));
-          if (leftWeight) left.add(this.scratch);
-          if (rightWeight) right.sub(this.scratch);
-        }
         for (let i = 0; i < garment.vertexCount; i += 1) {
           if (garment.pinned[i]) continue;
           contacts += this.projectBody(garment.positions[i]);
-          const target = garment.targets[i];
-          const distance = garment.positions[i].distanceTo(target);
-          if (distance > MAX_TRAVEL) garment.positions[i].lerp(target, (distance - MAX_TRAVEL) / distance);
         }
       }
       // Vertex-only contact misses a long triangle edge that crosses a body
@@ -285,7 +249,6 @@ export class GarmentContactSolver {
       output.needsUpdate = true;
       garment.display.geometry.computeVertexNormals();
     }
-    this.initialized = true;
     this.diagnostics.lastContacts = contacts;
     const elapsed = performance.now() - started;
     this.samples += 1;
