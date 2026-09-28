@@ -1358,7 +1358,7 @@ function bindIpc() {
       appVersion: app.getVersion(),
       platform: process.platform,
       isPackaged: app.isPackaged,
-      smokeTest: IS_AUTOMATED_TEST,
+      smokeTest: IS_AUTOMATED_TEST || IS_VISUAL_REVIEW,
       modelUrl: active.modelUrl,
       setupRequired: !active.modelUrl,
       character: active.manifest,
@@ -2077,6 +2077,14 @@ async function runMotionTest(details) {
   const screenshots = {};
   const poseSnapshots = {};
   const secondaryPoseSnapshots = {};
+  const garmentSnapshots = {};
+  const captureGarmentState = async (label) => {
+    const state = await mainWindow.webContents.executeJavaScript('window.__desktopPetGarmentContactSnapshot?.() ?? null', true);
+    garmentSnapshots[label] = state;
+    if (details.garmentContact?.enabled && !state?.enabled) {
+      throw new Error(`Garment contact stopped during ${label}: ${JSON.stringify(state)}`);
+    }
+  };
   mainWindow.setIgnoreMouseEvents(true, { forward: false });
   const requestedCaptureZoom = Number(process.env.YACHIYO_DESK_MOTION_ZOOM);
   if (Number.isFinite(requestedCaptureZoom) && requestedCaptureZoom >= 0.10 && requestedCaptureZoom <= 1.8) {
@@ -2135,6 +2143,7 @@ async function runMotionTest(details) {
     const idleBounds = visiblePixelBounds(idleImage);
     screenshots.idle = path.join(artifacts, 'motion-idle.png');
     fs.writeFileSync(screenshots.idle, idleImage.toPNG());
+    await captureGarmentState('idle');
 
     const walkStart = mainWindow.getPosition();
     if (!startAutonomousWalk()) throw new Error('Autonomous walk could not find a valid desktop destination.');
@@ -2163,6 +2172,7 @@ async function runMotionTest(details) {
     if (!walkImage) throw new Error('Autonomous walk did not produce a capture frame.');
     screenshots.walk = path.join(artifacts, 'motion-walk.png');
     fs.writeFileSync(screenshots.walk, walkImage.toPNG());
+    await captureGarmentState('walk');
     const walkEnd = mainWindow.getPosition();
     const inMotionSizeRatio = visibleSizeRatio(walkFrames.map((frame) => frame.bounds));
     const blankCaptureCount = walkFrames.filter((frame) => !frame.bounds).length;
@@ -2229,6 +2239,7 @@ async function runMotionTest(details) {
       const screenshotPath = path.join(artifacts, `motion-${motion.name}.png`);
       fs.writeFileSync(screenshotPath, image.toPNG());
       screenshots[motion.name] = screenshotPath;
+      await captureGarmentState(motion.name);
       poseSnapshots[motion.name] = await mainWindow.webContents.executeJavaScript(
         'window.__desktopPetPoseSnapshot?.() ?? null',
         true,
@@ -2279,6 +2290,7 @@ async function runMotionTest(details) {
         greetWaveFrames,
         walkSecondaryFrames,
         secondaryPoseSnapshots,
+        garmentSnapshots,
         screenshots,
       }, null, 2)}\n`,
       'utf8',
@@ -2287,6 +2299,15 @@ async function runMotionTest(details) {
     app.exit(0);
   } catch (error) {
     log('ERROR', 'Motion test failed', String(error?.stack || error));
+    const failedContact = await mainWindow.webContents.executeJavaScript(
+      'window.__desktopPetGarmentContactSnapshot?.() ?? null', true,
+    ).catch(() => null);
+    fs.writeFileSync(path.join(artifacts, 'motion-diagnostics.json'), `${JSON.stringify({
+      ok: false,
+      error: String(error?.stack || error),
+      garmentSnapshots,
+      garmentContact: failedContact,
+    }, null, 2)}\n`, 'utf8');
     app.exit(1);
   }
 }
