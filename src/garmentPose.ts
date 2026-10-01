@@ -10,6 +10,15 @@ export function skirtRestArmAngle(radius: number, height: number): number {
   return clamp(1.60 - 1.65 * (Math.max(0, radius) / height), 1.02, 1.43);
 }
 
+/** Minimum extra clearance for a real hand, retaining an already wider rest pose. */
+export function skirtHandClearanceAngle(current: number, shoulderRadius: number,
+  armLength: number, garmentRadius: number, handRadius: number): number {
+  if (![current, shoulderRadius, armLength, garmentRadius, handRadius].every(Number.isFinite)
+    || armLength < 1e-5 || garmentRadius <= 0) return current;
+  const reach = Math.max(0, garmentRadius + handRadius - shoulderRadius);
+  return Math.min(current, Math.acos(clamp(reach / armLength, 0, .7)));
+}
+
 /**
  * Keep a gait inside a narrow imported skirt's sagittal envelope. VRM spring
  * colliders apply to an entire joint chain, not the contacting triangles: a

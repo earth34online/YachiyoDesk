@@ -12,6 +12,7 @@ import { ProceduralAnimator } from './ProceduralAnimator';
 import { shouldCombineSkeletons } from './skin-policy';
 import { GarmentContactSolver } from './garmentContact';
 import { alphaFootprint } from './avatar-footprint';
+import { prepareGenericPmxSpringSpace } from './springContactSpace';
 import type {
   AppSettings,
   AvatarViewportBounds,
@@ -150,6 +151,7 @@ export class AvatarRuntime {
       this.vrm = vrm;
       this.prepareModel(vrm);
       this.applyMotionProfile(vrm, this.bootstrap.character.motionProfile);
+      prepareGenericPmxSpringSpace(vrm, this.bootstrap.character.motionProfile);
 
       // Converted PMX garments with identifiable body/cloth meshes receive a
       // local triangle-contact pass. Built-in Yachiyo and direct VRM assets
@@ -233,6 +235,14 @@ export class AvatarRuntime {
 
   garmentContactSnapshot(): Record<string, unknown> | null {
     return this.garmentContact ? { ...this.garmentContact.diagnostics } : GarmentContactSolver.lastProbe;
+  }
+
+  anatomySnapshot(): Record<string, unknown> | null {
+    return this.animator?.getAnatomyDiagnostics() ?? null;
+  }
+
+  fingerFlexionSamples(): Array<Record<string, unknown>> {
+    return this.animator?.sampleFingerFlexion() ?? [];
   }
 
   setDiagnosticBindPose(active: boolean): void {
@@ -791,6 +801,9 @@ export class AvatarRuntime {
       quality: this.settings.quality,
       initialPixelRatio: Number(this.renderer.getPixelRatio().toFixed(3)),
       motionProfileId: this.bootstrap.character.motionProfile.profileId,
+      sourceFormat: this.bootstrap.character.sourceFormat ?? 'vrm',
+      motionCapabilities: [...this.bootstrap.character.motionProfile.capabilities],
+      anatomy: this.animator?.getAnatomyDiagnostics() ?? null,
       tunedSpringJointCount: this.tunedSpringJointCount,
       garmentPose: this.animator?.getGarmentPoseDiagnostics() ?? null,
       garmentContact: this.garmentContact?.diagnostics ?? GarmentContactSolver.lastProbe,

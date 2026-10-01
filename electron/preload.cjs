@@ -11,6 +11,8 @@ function subscribe(channel, callback) {
 contextBridge.exposeInMainWorld('yachiyoDesk', {
   getBootstrap: () => ipcRenderer.invoke('app:get-bootstrap'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  flushInteractionSettings: (patch, characterId) => ipcRenderer.sendSync('settings:flush-interaction', { patch, characterId }),
+  interactionSettingsFlushed: (token, ok) => ipcRenderer.send('settings:interaction-flushed', { token, ok }),
   setClickThrough: (ignore) => ipcRenderer.send('window:set-click-through', Boolean(ignore)),
   beginWindowDrag: (screenX, screenY) => ipcRenderer.send('window:drag-start', { screenX, screenY }),
   updateWindowDrag: (screenX, screenY) => ipcRenderer.send('window:drag-move', { screenX, screenY }),
@@ -32,6 +34,7 @@ contextBridge.exposeInMainWorld('yachiyoDesk', {
   switchCharacter: (id) => ipcRenderer.invoke('characters:switch', id),
   removeCharacter: (id) => ipcRenderer.invoke('characters:remove', id),
   runtimeReady: (details) => ipcRenderer.send('runtime:ready', details),
+  runtimeSetupRequired: () => ipcRenderer.send('runtime:setup-required'),
   runtimeViewportBounds: (details) => ipcRenderer.send('runtime:viewport-bounds', details),
   runtimeTelemetry: (details) => ipcRenderer.send('runtime:telemetry', details),
   runtimeError: (details) => ipcRenderer.send('runtime:error', details),

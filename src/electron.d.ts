@@ -17,6 +17,8 @@ declare global {
     yachiyoDesk: {
       getBootstrap(): Promise<BootstrapData>;
       updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+      flushInteractionSettings(patch: Partial<AppSettings>, characterId: string): boolean;
+      interactionSettingsFlushed(token: number, ok: boolean): void;
       setClickThrough(ignore: boolean): void;
       beginWindowDrag(screenX: number, screenY: number): void;
       updateWindowDrag(screenX: number, screenY: number): void;
@@ -38,6 +40,7 @@ declare global {
       switchCharacter(id: string): Promise<{ ok: boolean; error?: string }>;
       removeCharacter(id: string): Promise<{ ok: boolean; canceled?: boolean; error?: string }>;
       runtimeReady(details: RuntimeDiagnostics): void;
+      runtimeSetupRequired(): void;
       runtimeViewportBounds(details: AvatarViewportBounds): void;
       runtimeTelemetry(details: RuntimePerformanceStats): void;
       runtimeError(details: { message: string; stack?: string }): void;

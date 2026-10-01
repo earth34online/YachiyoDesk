@@ -14,18 +14,17 @@ let runtime: AvatarRuntime;
 let interaction: InteractionController;
 
 async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
-  currentSettings = await window.yachiyoDesk.updateSettings(patch);
+  interaction?.cancelPendingSettings(patch);
+  currentSettings = interaction.setSettings(await window.yachiyoDesk.updateSettings(patch));
   runtime.setSettings(currentSettings);
   window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
-  interaction.setSettings(currentSettings);
   ui.updateSettings(currentSettings);
 }
 
 function previewSettingsPatch(patch: Partial<AppSettings>): void {
-  const preview = { ...currentSettings, ...patch };
+  const preview = interaction.previewSettings(patch);
   runtime.setSettings(preview);
   window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
-  interaction.setSettings(preview);
 }
 
 function triggerReaction(reaction: ReactionName, speechKey: string = reaction): void {
@@ -38,6 +37,7 @@ const ui = new AppUI(currentSettings, bootstrap.character, {
   onSettingsPatch: (patch) => { void applySettingsPatch(patch); },
   onSettingsPreview: previewSettingsPatch,
   onCloseSettings: () => interaction.reevaluateClickThrough(),
+  onInteractionStateChanged: () => interaction?.reevaluateClickThrough(),
   onResetPose: () => {
     runtime.resetPose();
     void applySettingsPatch({ zoom: DEFAULT_CHARACTER_ZOOM, rotationY: 0 });
@@ -58,10 +58,12 @@ runtime = new AvatarRuntime(canvas, bootstrap, {
   },
   onFatal: (error) => {
     ui.showFatal(error);
-    window.yachiyoDesk.setClickThrough(false);
     window.yachiyoDesk.runtimeError({ message: error.message, stack: error.stack });
   },
-  onSetupRequired: () => ui.showSetupRequired(),
+  onSetupRequired: () => {
+    ui.showSetupRequired();
+    window.yachiyoDesk.runtimeSetupRequired();
+  },
   onViewportBounds: (bounds) => window.yachiyoDesk.runtimeViewportBounds(bounds),
 });
 
@@ -71,11 +73,14 @@ document.querySelector<HTMLButtonElement>('#setup-open-characters')?.addEventLis
 });
 if (bootstrap.smokeTest) {
   Object.assign(window as unknown as Record<string, unknown>, {
+    __desktopPetShowFatal: (message: string) => ui.showFatal(new Error(message)),
     __desktopPetPoseSnapshot: () => runtime.humanoidPoseSnapshot(),
     __desktopPetLocalPoseSnapshot: () => runtime.humanoidPoseSnapshot(true),
     __desktopPetSetAutonomy: (command: AutonomyCommand) => runtime.setAutonomy(command),
     __desktopPetSecondarySnapshot: () => runtime.secondaryPoseSnapshot(),
     __desktopPetGarmentContactSnapshot: () => runtime.garmentContactSnapshot(),
+    __desktopPetAnatomySnapshot: () => runtime.anatomySnapshot(),
+    __desktopPetFingerFlexionSamples: () => runtime.fingerFlexionSamples(),
     __desktopPetViewportBounds: () => runtime.avatarViewportBounds(),
     __desktopPetPerformance: () => runtime.getPerformanceStats(),
     __desktopPetBindPose: (active: boolean) => runtime.setDiagnosticBindPose(active),
@@ -83,7 +88,9 @@ if (bootstrap.smokeTest) {
 }
 
 const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }) => {
-  if (command === 'show-settings') {
+  if (command === 'flush-interaction-settings' && typeof payload === 'number') {
+    window.yachiyoDesk.interactionSettingsFlushed(payload, interaction.flushBeforeUnload());
+  } else if (command === 'show-settings') {
     window.yachiyoDesk.noteUserActivity();
     ui.showSettings();
   } else if (command === 'show-characters') {
@@ -129,11 +136,10 @@ const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }
 });
 
 const removeSettingsListener = window.yachiyoDesk.onSettingsChanged((settings) => {
-  currentSettings = settings;
-  runtime.setSettings(settings);
+  currentSettings = interaction.setSettings(settings);
+  runtime.setSettings(currentSettings);
   window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
-  interaction.setSettings(settings);
-  ui.updateSettings(settings);
+  ui.updateSettings(currentSettings);
 });
 const removeFocusListener = window.yachiyoDesk.onFocusChanged((status) => ui.updateFocus(status));
 const removePetListener = window.yachiyoDesk.onPetStatusChanged((status) => ui.updatePetStatus(status));
@@ -158,10 +164,12 @@ speechFrame = requestAnimationFrame(updateSpeechPosition);
 const telemetryTimer = window.setInterval(() => {
   const stats = runtime.getPerformanceStats();
   ui.updatePerformance(stats);
+  ui.updateGarmentContact(runtime.garmentContactSnapshot());
   window.yachiyoDesk.runtimeTelemetry(stats);
 }, 2000);
 
 window.addEventListener('beforeunload', () => {
+  interaction.flushBeforeUnload();
   cancelAnimationFrame(speechFrame);
   window.clearInterval(telemetryTimer);
   cancelAnimationFrame(resizeFrame);

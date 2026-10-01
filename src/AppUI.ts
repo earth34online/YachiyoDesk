@@ -16,6 +16,7 @@ interface UiCallbacks {
   onSettingsPatch: (patch: Partial<AppSettings>) => void;
   onSettingsPreview: (patch: Partial<AppSettings>) => void;
   onCloseSettings: () => void;
+  onInteractionStateChanged: () => void;
   onResetPose: () => void;
   onResetWindow: () => void;
   onReaction: (reaction: ReactionName, speechKey?: string) => void;
@@ -90,6 +91,7 @@ export class AppUI {
   private activePage: SettingsPage = 'general';
   private characters: InstalledCharacter[] = [];
   private performance: RuntimePerformanceStats | null = null;
+  private garmentContact: Record<string, unknown> | null = null;
   private focus: FocusStatus = {
     running: false,
     mode: 'focus',
@@ -104,6 +106,7 @@ export class AppUI {
   private settingsHideTimer = 0;
   private settingsShowFrame = 0;
   private settingsOpen = false;
+  private blockingOverlayOpen = true;
 
   constructor(settings: AppSettings, character: CharacterManifest, callbacks: UiCallbacks) {
     this.settings = settings;
@@ -125,6 +128,7 @@ export class AppUI {
     this.companionDock.addEventListener('pointerenter', () => {
       window.clearTimeout(this.dockHideTimer);
       document.body.classList.add('companion-dock-open');
+      this.callbacks.onInteractionStateChanged();
     });
     this.companionDock.addEventListener('pointerleave', () => this.setCompanionHover(false));
     document.addEventListener('pointerdown', (event) => {
@@ -145,20 +149,26 @@ export class AppUI {
   }
 
   finishLoading(): void {
+    this.blockingOverlayOpen = false;
+    this.callbacks.onInteractionStateChanged();
     this.loading.classList.add('is-complete');
     window.setTimeout(() => { this.loading.hidden = true; }, 460);
   }
 
   showFatal(error: Error): void {
+    this.blockingOverlayOpen = true;
     this.loading.hidden = true;
+    if (this.setupRequired) this.setupRequired.hidden = true;
     this.fatalMessage.textContent = error.message;
     this.fatal.hidden = false;
+    this.callbacks.onInteractionStateChanged();
   }
 
   showSetupRequired(): void {
+    this.blockingOverlayOpen = true;
     this.loading.hidden = true;
     if (this.setupRequired) this.setupRequired.hidden = false;
-    window.yachiyoDesk.setClickThrough(false);
+    this.callbacks.onInteractionStateChanged();
   }
 
   showSpeech(key: string, duration = 2800): void {
@@ -203,7 +213,7 @@ export class AppUI {
       // frame. Never let that stale frame make a logically closed panel visible.
       if (this.settingsOpen) this.settingsPanel.classList.add('is-visible');
     });
-    window.yachiyoDesk.setClickThrough(false);
+    this.callbacks.onInteractionStateChanged();
     window.yachiyoDesk.setInteractionPanelOpen(true);
     if (page === 'characters') void this.refreshCharacters();
   }
@@ -232,6 +242,10 @@ export class AppUI {
     return this.settingsOpen;
   }
 
+  isBlockingOverlayOpen(): boolean {
+    return this.blockingOverlayOpen;
+  }
+
   isCompanionDockTarget(target: EventTarget | null): boolean {
     return target instanceof Node && this.companionDock.contains(target);
   }
@@ -244,11 +258,13 @@ export class AppUI {
     window.clearTimeout(this.dockHideTimer);
     if (active) {
       document.body.classList.add('companion-dock-open');
+      this.callbacks.onInteractionStateChanged();
       return;
     }
     this.dockHideTimer = window.setTimeout(() => {
       if (!this.companionDock.matches(':hover')) {
         document.body.classList.remove('companion-dock-open');
+        this.callbacks.onInteractionStateChanged();
       }
     }, 360);
   }
@@ -276,6 +292,23 @@ export class AppUI {
   updatePerformance(stats: RuntimePerformanceStats): void {
     this.performance = stats;
     if (this.activePage === 'performance' && this.isSettingsOpen()) this.renderSettings();
+  }
+
+  updateGarmentContact(state: Record<string, unknown> | null): void {
+    this.garmentContact = state;
+    const note = this.settingsPanel.querySelector<HTMLElement>('[data-garment-contact]');
+    if (note) note.textContent = this.garmentContactText();
+  }
+
+  private garmentContactText(): string {
+    if (!this.settings.physics) return '衣物网格接触已关闭。';
+    const state = this.garmentContact;
+    if (!state || !('garmentMeshes' in state)) return '当前模型使用原有摇摆骨骼物理。';
+    if (Number(state.coolingMeshes) > 0) return `部分衣物接触暂缓，约 ${Math.ceil(Number(state.retryInSeconds))} 秒后重试；其他衣物与摇摆骨骼仍在运行。`;
+    if (Number(state.reducedMeshes) > 0) return '衣物接触正在节省性能，已减少表面修正次数；摇摆骨骼仍在运行。';
+    if (Number(state.shapeLimitedMeshes) > 0 || Number(state.unresolvedIntersections) > 0)
+      return '衣物保护运行中；为保持裙片与袖口形状，当前姿态仍有局部接触未消除。';
+    return '衣物网格接触运行中；复杂姿态仍可能有局部穿透。';
   }
 
   updateFocus(status: FocusStatus): void {
@@ -413,6 +446,11 @@ export class AppUI {
 
     container.append(this.createSectionTitle('行为开关', '所有设置都会保存在本机。'));
     for (const toggle of GENERAL_TOGGLES) container.append(this.createToggle(toggle));
+    if (this.character.motionProfile.capabilities.includes('pmx-converted')) {
+      const contactNote = document.createElement('p');
+      contactNote.className = 'performance-note'; contactNote.dataset.garmentContact = '';
+      contactNote.textContent = this.garmentContactText(); container.append(contactNote);
+    }
 
     const sleepOptions = [1, 3, 5, 10, 20, 30].map((minutes) => [String(minutes), `${minutes} 分钟`] as [string, string]);
     container.append(this.createSelectSetting(

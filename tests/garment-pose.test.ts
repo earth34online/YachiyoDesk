@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { skirtGaitScale, skirtLateralGaitScale, skirtRestArmAngle } from '../src/garmentPose';
+import { skirtGaitScale, skirtLateralGaitScale, skirtRestArmAngle, skirtHandClearanceAngle } from '../src/garmentPose';
 
 describe('imported skirt neutral arm pose', () => {
+  it('measures enough radial room for the hand and retains an already wider pose', () => {
+    const angle = skirtHandClearanceAngle(1.4, .08, .5, .18, .03);
+    expect(.08 + .5 * Math.cos(angle)).toBeCloseTo(.21, 6);
+    expect(skirtHandClearanceAngle(1.1, .08, .5, .18, .03)).toBe(1.1);
+    expect(skirtHandClearanceAngle(1.4, .08, 0, .18, .03)).toBe(1.4);
+  });
   it('lets narrow garments hang closer to the body than bell skirts', () => {
     const narrow = skirtRestArmAngle(0.18, 1.55);
     const wide = skirtRestArmAngle(0.47, 1.55);

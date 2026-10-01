@@ -1,6 +1,6 @@
 {
   "name": "yachiyo-desk",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "private": true,
   "description": "A high-quality local desktop companion with VRM/PMX character import",
   "author": "Excalibur",
@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify": "npm run typecheck && npm run test && npm run build:renderer",
-    "smoke": "npm run build:renderer && electron . --smoke-test",
+    "smoke": "npm run build:renderer && electron . --onboarding-test",
+    "smoke:model": "npm run build:renderer && electron . --smoke-test",
     "start": "npm run build:renderer && electron .",
     "dist": "npm run verify && node scripts/package.cjs --win portable nsis",
     "dist:portable": "npm run verify && node scripts/package.cjs --win portable"
@@ -48,6 +49,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "app-icons/icon.png"
+      },
       {
         "from": "characters",
         "to": "characters",

@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { FRONT_PALM_TWIST_RADIANS, viewerFacingPalmTwists } from './handPose';
 import { ExpressionController } from './ExpressionController';
 import { legGait } from './gait';
-import { skirtGaitScale, skirtLateralGaitScale, skirtRestArmAngle } from './garmentPose';
+import { GenericPoseConstraints } from './genericPoseConstraints';
+import { skirtGaitScale, skirtLateralGaitScale, skirtRestArmAngle, skirtHandClearanceAngle } from './garmentPose';
 import { clamp, damp, randomBetween, reactionEnvelope, smoothstep01 } from './math';
 import type { AppSettings, AutonomousMotion, MotionProfile, ReactionName } from './types';
 
@@ -126,6 +127,7 @@ export class ProceduralAnimator {
   private readonly transitionQuaternion = new THREE.Quaternion();
   private settings: AppSettings;
   private readonly motionProfile: MotionProfile;
+  private readonly genericConstraints: GenericPoseConstraints | null;
   private readonly skirtRestAngles: { left: number; right: number; leftRadius: number; rightRadius: number; frontDepth: number; backDepth: number; gaitScale: number; lateralGaitScale: number; height: number } | null;
   private elapsed = 0;
   private nextBlinkAt = randomBetween(2.2, 4.8);
@@ -153,6 +155,7 @@ export class ProceduralAnimator {
     this.vrm = vrm;
     this.settings = settings;
     this.motionProfile = motionProfile;
+    this.genericConstraints = GenericPoseConstraints.create(vrm, motionProfile);
     this.skirtRestAngles = this.measureSkirtRestAngles();
     this.pose = createReusablePose(motionProfile.capabilities.includes('pmx-converted'));
     this.expressions = new ExpressionController(vrm.expressionManager);
@@ -165,6 +168,30 @@ export class ProceduralAnimator {
 
   getGarmentPoseDiagnostics(): typeof this.skirtRestAngles {
     return this.skirtRestAngles;
+  }
+
+  getAnatomyDiagnostics(): Record<string, unknown> | null {
+    return this.genericConstraints ? { ...this.genericConstraints.diagnostics, ...this.genericConstraints.measure() } : null;
+  }
+
+  sampleFingerFlexion(): Array<Record<string, unknown>> {
+    if (!this.genericConstraints) return [];
+    const savedPose = clonePose(this.pose), savedNormalized = this.vrm.humanoid.getNormalizedPose();
+    const samples: Array<Record<string, unknown>> = [];
+    try {
+      for (const curl of [0, .8, 1.2]) {
+        this.setFingerPose('left', curl); this.setFingerPose('right', curl);
+        this.vrm.humanoid.setNormalizedPose(this.pose); this.vrm.humanoid.update();
+        samples.push({ curl, ...this.genericConstraints.measure() });
+      }
+    } finally {
+      for (const bone of FINGER_BONES) {
+        const original = savedPose[bone]?.rotation, rotation = this.pose[bone]?.rotation;
+        if (original && rotation) original.forEach((value, index) => { rotation[index] = value; });
+      }
+      this.vrm.humanoid.setNormalizedPose(savedNormalized); this.vrm.humanoid.update();
+    }
+    return samples;
   }
 
   setPointer(x: number, y: number, active: boolean): void {
@@ -251,6 +278,13 @@ export class ProceduralAnimator {
     const reactionName = activeReaction?.name ?? null;
     this.updatePose(sleeping, reactionName, reactionWeight, reactionElapsed, activeReaction?.duration ?? 1);
     this.applyPoseTransition();
+    const progress = reactionElapsed / (activeReaction?.duration ?? 1);
+    const constraintWeight = reactionName === 'crouch' ? windowPulse(progress, .02, .24, .72, .98)
+      : reactionName === 'tiptoe' ? windowPulse(progress, .02, .22, .76, .98)
+        : reactionName === 'think' ? windowPulse(progress, .03, .22, .79, .98) : 0;
+    const constraintBlend = this.transitionPose
+      ? smoothstep01(clamp((this.elapsed - this.transitionStartedAt) / this.transitionDuration, 0, 1)) : 1;
+    this.genericConstraints?.apply(this.pose, reactionName, constraintWeight * reactionWeight, constraintBlend);
     this.vrm.humanoid.setNormalizedPose(this.pose);
 
     if (this.vrm.lookAt) {
@@ -365,12 +399,13 @@ export class ProceduralAnimator {
     let rightShoulderX = 0;
     let rightShoulderY = 0;
     let rightShoulderZ = -0.025 - breath * 0.25;
-    let leftArmX = 0.025;
+    const idleArmPitch = this.genericConstraints?.idleArmPitch ?? 0.025;
+    let leftArmX = idleArmPitch;
     let leftArmY = 0.025;
     // Use the final garment-aware rest pose throughout gesture fade-out. A
     // late idle-only override made the arm visit 1.16 first, then jump to rest.
     let leftArmZ = this.skirtRestAngles?.left ?? (1.16 + weightShift * 0.7);
-    let rightArmX = 0.025;
+    let rightArmX = idleArmPitch;
     let rightArmY = -0.025;
     let rightArmZ = this.skirtRestAngles ? -this.skirtRestAngles.right : -1.16 + weightShift * 0.7;
     let leftLowerX = -0.14;
@@ -905,9 +940,44 @@ export class ProceduralAnimator {
       if (-radialZ > backDepth) backDepth = -radialZ;
     }
     if (leftRadius < 0.04 || rightRadius < 0.04) return null;
+    const restAngles = { left: skirtRestArmAngle(leftRadius, height), right: skirtRestArmAngle(rightRadius, height) };
+    if (this.genericConstraints) {
+      // Spring-joint centers under-estimate the cloth surface and the hand's
+      // thickness. Measure the actual skirt at relaxed wrist height. Moving
+      // an intersecting hand a little outward avoids forcing fabric between
+      // the palm and thigh; the author's distinct rig retains its old pose.
+      for (const side of ['left', 'right'] as const) {
+        const shoulder = this.vrm.humanoid.getRawBoneNode(`${side}UpperArm` as VRMHumanBoneName);
+        const elbow = this.vrm.humanoid.getRawBoneNode(`${side}LowerArm` as VRMHumanBoneName);
+        const wrist = this.vrm.humanoid.getRawBoneNode(`${side}Hand` as VRMHumanBoneName);
+        if (!shoulder || !elbow || !wrist) continue;
+        const shoulderPoint = localPoint(shoulder), elbowPoint = localPoint(elbow), wristPoint = localPoint(wrist);
+        const armLength = shoulderPoint.distanceTo(elbowPoint) + elbowPoint.distanceTo(wristPoint);
+        const wristHeight = shoulderPoint.y - armLength * Math.sin(restAngles[side]);
+        let garmentRadius = 0;
+        this.vrm.scene.traverse(object => {
+          const mesh = object as THREE.SkinnedMesh;
+          if (!mesh.isSkinnedMesh) return;
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          if (!materials.some(material => /skirt|スカート|裙|dress/i.test(material.name))) return;
+          mesh.updateWorldMatrix(true, false);
+          for (let i = 0; i < mesh.geometry.attributes.position.count; i++) {
+            mesh.getVertexPosition(i, point); mesh.localToWorld(point); this.vrm.scene.worldToLocal(point);
+            if (Math.abs(point.y - wristHeight) > height * .03) continue;
+            if ((point.x - hipsPoint.x) * (shoulderPoint.x - hipsPoint.x) < 0) continue;
+            garmentRadius = Math.max(garmentRadius, Math.abs(point.x - hipsPoint.x));
+          }
+        });
+        const index = this.vrm.humanoid.getRawBoneNode(`${side}IndexProximal` as VRMHumanBoneName);
+        const little = this.vrm.humanoid.getRawBoneNode(`${side}LittleProximal` as VRMHumanBoneName);
+        const handRadius = index && little ? localPoint(index).distanceTo(localPoint(little)) * .5 : armLength * .04;
+        restAngles[side] = skirtHandClearanceAngle(restAngles[side], Math.abs(shoulderPoint.x - hipsPoint.x),
+          armLength, garmentRadius, handRadius + height * .006);
+      }
+    }
     return {
-      left: skirtRestArmAngle(leftRadius, height),
-      right: skirtRestArmAngle(rightRadius, height),
+      left: restAngles.left,
+      right: restAngles.right,
       leftRadius,
       rightRadius,
       frontDepth,
@@ -947,9 +1017,10 @@ export class ProceduralAnimator {
       [`${prefix}LittleProximal`, `${prefix}LittleIntermediate`, `${prefix}LittleDistal`, 1.10],
     ] as const;
     for (const [proximal, intermediate, distal, scale] of chains) {
-      this.setRotation(proximal, curl * scale, 0, 0);
-      this.setRotation(intermediate, curl * scale * 1.22, 0, 0);
-      this.setRotation(distal, curl * scale * 0.82, 0, 0);
+      for (const [bone, amount] of [[proximal, curl * scale], [intermediate, curl * scale * 1.22],
+        [distal, curl * scale * .82]] as const) {
+        if (!this.genericConstraints?.setFinger(this.pose, bone, amount)) this.setRotation(bone, amount, 0, 0);
+      }
     }
   }
 }

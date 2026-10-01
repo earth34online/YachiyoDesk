@@ -41,6 +41,7 @@ export interface CharacterManifest {
   originalTitle: string;
   creator: string;
   model: string;
+  sourceFormat?: 'vrm' | 'pmx';
   credit: string;
   messages: Record<string, string[]>;
   behavior: BehaviorProfile;
@@ -133,6 +134,7 @@ export interface CharacterImportResult {
 }
 
 export type AppCommand =
+  | 'flush-interaction-settings'
   | 'show-settings'
   | 'show-characters'
   | 'reset-pose'
@@ -167,6 +169,9 @@ export interface RuntimeDiagnostics {
   quality: QualityMode;
   initialPixelRatio: number;
   motionProfileId: string;
+  sourceFormat: 'vrm' | 'pmx';
+  motionCapabilities: MotionProfile['capabilities'];
+  anatomy: Record<string, unknown> | null;
   tunedSpringJointCount: number;
   garmentPose: {
     left: number;

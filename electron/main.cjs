@@ -16,6 +16,10 @@ const {
 const fs = require('node:fs');
 const path = require('node:path');
 const { SettingsStore } = require('./settings.cjs');
+const { inspectVrmFile } = require('./vrm-file.cjs');
+const { loadApplicationIcon } = require('./app-icon.cjs');
+const { readTestCharacterMetadata } = require('./test-character.cjs');
+const { validateAnatomy, validateFingerFlexion, garmentSurfaceIssues } = require('./motion-quality.cjs');
 const { switchCharacterScale, rememberCharacterScale } = require('./character-scale.cjs');
 const { calculateDragPosition, clampDragPosition, horizontalWindowRange, planGenericWalk } = require('./window-drag.cjs');
 const { PMX_CONVERTED_MOTION_PROFILE, sanitizeMotionProfile } = require('./motion-profile.cjs');
@@ -36,12 +40,13 @@ process.stderr?.on('error', () => {});
 
 const IS_DEV = process.argv.includes('--dev');
 const IS_SMOKE = process.argv.includes('--smoke-test');
+const IS_ONBOARDING_TEST = process.argv.includes('--onboarding-test');
 const IS_SOAK = process.argv.includes('--soak-test');
 const IS_MOTION_TEST = process.argv.includes('--motion-test');
 const IS_VISUAL_REVIEW = process.argv.includes('--visual-review');
 const IS_FLICKER_TEST = process.argv.includes('--flicker-test');
 const IS_INTERACTION_TEST = process.argv.includes('--interaction-test');
-const IS_AUTOMATED_TEST = IS_SMOKE || IS_SOAK || IS_MOTION_TEST || IS_FLICKER_TEST || IS_INTERACTION_TEST;
+const IS_AUTOMATED_TEST = IS_ONBOARDING_TEST || IS_SMOKE || IS_SOAK || IS_MOTION_TEST || IS_FLICKER_TEST || IS_INTERACTION_TEST;
 const APP_NAME = 'YachiyoDesk';
 const DEFAULT_WIDTH = 560;
 const DEFAULT_HEIGHT = 840;
@@ -129,6 +134,10 @@ let nextInterludeAfterWalks = 3;
 let patrolDirection = -1;
 let interactionPanelOpen = false;
 let runtimeIsReady = false;
+let latestClickThrough = false;
+let characterSwitchInProgress = false;
+let interactionFlushToken = 0;
+let modelSmokeRunning = false;
 let lastUserActivityAt = 0;
 let focusTimer = null;
 let focusState = {
@@ -174,11 +183,16 @@ function userCharactersRoot() {
 }
 
 function prepareSmokeCharacter() {
-  if (!IS_SMOKE) return;
+  if (!IS_AUTOMATED_TEST || IS_ONBOARDING_TEST) return;
+  const fixture = process.env.YACHIYO_DESK_TEST_MODEL || path.join(characterRoot(), 'model.vrm');
+  if (!fs.existsSync(fixture)) throw new Error('有模型测试需要合法本地 VRM：请设置 YACHIYO_DESK_TEST_MODEL；无模型引导请运行 npm run smoke。');
+  inspectVrmFile(fixture);
+  const fixtureMetadata = readTestCharacterMetadata(fixture);
+  const recommended = recommendedYachiyoImport(fixture, 'vrm');
   const id = 'smoke-local';
   const directory = path.join(userCharactersRoot(), id);
   fs.mkdirSync(directory, { recursive: true });
-  fs.copyFileSync(path.join(characterRoot(), 'model.vrm'), path.join(directory, 'model.vrm'));
+  fs.copyFileSync(fixture, path.join(directory, 'model.vrm'));
   const manifest = {
     id,
     displayName: '本地测试角色',
@@ -188,6 +202,11 @@ function prepareSmokeCharacter() {
     model: 'model.vrm',
     credit: '自动化角色库验证',
     messages: genericMessages('本地测试角色'),
+    ...fixtureMetadata,
+    ...(recommended ? {
+      sourceFormat: fixtureMetadata.sourceFormat, sourceSha256: recommended.sourceSha256,
+      modelSha256: hashFileSha256(fixture), motionProfile: recommended.motionProfile,
+    } : {}),
   };
   fs.writeFileSync(path.join(directory, 'character.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   settingsStore.patch({ activeCharacterId: id });
@@ -363,43 +382,8 @@ function activeCharacterRecord() {
   const activeId = settingsStore.get().activeCharacterId;
   const record = characterRecord(activeId) || characterRecord('yachiyo');
   if (!record) throw new Error('Bundled Yachiyo character is unavailable.');
-  if (record.manifest.id !== activeId) settingsStore.patch({ activeCharacterId: 'yachiyo' });
+  if (record.manifest.id !== activeId) settingsStore.patch(switchCharacterScale(settingsStore.get(), record.manifest.id));
   return record;
-}
-
-function inspectVrmFile(filePath) {
-  const stats = fs.statSync(filePath);
-  if (!stats.isFile() || stats.size < 20 || stats.size > 512 * 1024 * 1024) {
-    throw new Error('VRM 文件大小无效，支持范围为 20 字节到 512 MB。');
-  }
-  const handle = fs.openSync(filePath, 'r');
-  try {
-    const header = Buffer.alloc(20);
-    fs.readSync(handle, header, 0, 20, 0);
-    if (header.toString('ascii', 0, 4) !== 'glTF' || header.readUInt32LE(4) !== 2) {
-      throw new Error('文件不是有效的 VRM/GLB 2.0。');
-    }
-    const declaredLength = header.readUInt32LE(8);
-    const jsonLength = header.readUInt32LE(12);
-    const jsonType = header.readUInt32LE(16);
-    if (declaredLength > stats.size || jsonType !== 0x4E4F534A || jsonLength <= 2 || jsonLength > 64 * 1024 * 1024) {
-      throw new Error('VRM 文件头或 JSON 数据块无效。');
-    }
-    const jsonBuffer = Buffer.alloc(jsonLength);
-    fs.readSync(handle, jsonBuffer, 0, jsonLength, 20);
-    const json = JSON.parse(jsonBuffer.toString('utf8').replace(/\u0000+$/g, '').trim());
-    const vrm0 = json.extensions?.VRM;
-    const vrm1 = json.extensions?.VRMC_vrm;
-    if (!vrm0 && !vrm1 && !json.extensionsUsed?.some((name) => name === 'VRM' || name === 'VRMC_vrm')) {
-      throw new Error('该 GLB 文件没有 VRM 扩展。');
-    }
-    const meta = vrm0?.meta || vrm1?.meta || {};
-    const displayName = meta.title || meta.name || path.parse(filePath).name;
-    const creator = meta.author || (Array.isArray(meta.authors) ? meta.authors.join('、') : '') || '本地导入';
-    return { displayName: String(displayName).slice(0, 80), creator: String(creator).slice(0, 120) };
-  } finally {
-    fs.closeSync(handle);
-  }
 }
 
 function stableExecutablePath() {
@@ -791,7 +775,7 @@ function patchSettings(patch) {
 }
 
 function applyAutoStart(enabled) {
-  if (!app.isPackaged || IS_SMOKE) return;
+  if (!app.isPackaged || IS_AUTOMATED_TEST) return;
   const loginPath = stableExecutablePath();
   const current = app.getLoginItemSettings({ path: loginPath });
   if (current.openAtLogin !== enabled) {
@@ -894,7 +878,7 @@ function setInteractionPanelOpen(open) {
 }
 
 function startAutonomousWalk() {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (!runtimeIsReady || autonomyMove || autonomyMoveTimer || !mainWindow || mainWindow.isDestroyed()) return false;
   const settings = settingsStore.get();
   const bounds = mainWindow.getBounds();
   const currentDisplay = screen.getDisplayNearestPoint({
@@ -1109,19 +1093,56 @@ function toggleSetting(key) {
   patchSettings({ [key]: !current[key] });
 }
 
-function switchCharacter(id) {
+function resetRuntimeState() {
+  runtimeIsReady = false;
+  clearTimeout(autonomyTimer);
+  autonomyTimer = null;
+  stopAutonomousMovement(false);
+  clearTimeout(windowDragTimer);
+  windowDragTimer = null;
+  windowDrag = null;
+  interactionPanelOpen = false;
+  avatarViewportBounds = null;
+}
+
+function flushRendererInteractionSettings() {
+  if (!runtimeIsReady || !mainWindow || mainWindow.isDestroyed()) return Promise.resolve(true);
+  const contents = mainWindow.webContents;
+  const token = ++interactionFlushToken;
+  return new Promise((resolve) => {
+    const finish = (ok) => {
+      clearTimeout(timeout);
+      ipcMain.removeListener('settings:interaction-flushed', onFlushed);
+      resolve(ok);
+    };
+    const onFlushed = (event, response) => {
+      if (event.sender === contents && response?.token === token) finish(response.ok === true);
+    };
+    const timeout = setTimeout(() => finish(false), 2000);
+    ipcMain.on('settings:interaction-flushed', onFlushed);
+    sendCommand('flush-interaction-settings', token);
+  });
+}
+
+async function switchCharacter(id) {
   const record = characterRecord(id);
   if (!record) return { ok: false, error: '角色不存在或文件已损坏。' };
   if (id === settingsStore.get().activeCharacterId) return { ok: true };
-  settingsStore.patch(switchCharacterScale(settingsStore.get(), id));
-  notifySettings(settingsStore.get());
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    runtimeIsReady = false;
-    avatarViewportBounds = null;
-    mainWindow.setIgnoreMouseEvents(false);
-    mainWindow.webContents.reloadIgnoringCache();
+  if (characterSwitchInProgress) return { ok: false, error: '角色切换正在进行，请稍后再试。' };
+  characterSwitchInProgress = true;
+  try {
+    if (!await flushRendererInteractionSettings()) return { ok: false, error: '当前角色设置未能保存，请稍后重试切换。' };
+    resetRuntimeState();
+    settingsStore.patch(switchCharacterScale(settingsStore.get(), id));
+    notifySettings(settingsStore.get());
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setIgnoreMouseEvents(false);
+      mainWindow.webContents.reloadIgnoringCache();
+    }
+    return { ok: true };
+  } finally {
+    characterSwitchInProgress = false;
   }
-  return { ok: true };
 }
 
 function characterSubmenu() {
@@ -1217,8 +1238,7 @@ function rebuildTrayMenu() {
 }
 
 function createTray() {
-  const iconPath = path.join(characterRoot(), 'thumbnail.png');
-  let icon = nativeImage.createFromPath(iconPath);
+  let icon = loadApplicationIcon(nativeImage, projectRoot());
   if (!icon.isEmpty()) icon = icon.resize({ width: 32, height: 32, quality: 'best' });
   tray = new Tray(icon);
   tray.setToolTip(`YachiyoDesk · ${activeCharacterRecord().manifest.displayName}`);
@@ -1296,7 +1316,7 @@ async function createWindow() {
     minWidth: 300,
     minHeight: 460,
     show: false,
-    icon: path.join(characterRoot(), 'thumbnail.png'),
+    icon: loadApplicationIcon(nativeImage, projectRoot()),
     transparent: true,
     backgroundColor: '#00000000',
     frame: false,
@@ -1342,12 +1362,16 @@ async function createWindow() {
     mainWindow = null;
   });
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    resetRuntimeState();
     log('ERROR', 'Renderer process exited unexpectedly', details);
     if (IS_AUTOMATED_TEST) app.exit(1);
   });
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    resetRuntimeState();
     log('ERROR', 'Renderer page failed to load', { errorCode, errorDescription });
   });
+
+  mainWindow.webContents.on('did-start-loading', resetRuntimeState);
 
   if (IS_DEV) await mainWindow.loadURL('http://127.0.0.1:5173');
   else await mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
@@ -1375,8 +1399,8 @@ function bindIpc() {
       platform: process.platform,
       isPackaged: app.isPackaged,
       smokeTest: IS_AUTOMATED_TEST || IS_VISUAL_REVIEW,
-      modelUrl: active.modelUrl,
-      setupRequired: !active.modelUrl,
+      modelUrl: IS_ONBOARDING_TEST ? null : active.modelUrl,
+      setupRequired: IS_ONBOARDING_TEST || !active.modelUrl,
       character: active.manifest,
       settings: settingsStore.get(),
     };
@@ -1385,6 +1409,29 @@ function bindIpc() {
   ipcMain.handle('settings:update', (_event, patch) => {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return settingsStore.get();
     return patchSettings(patch);
+  });
+
+  ipcMain.on('settings:flush-interaction', (event, request) => {
+    try {
+      const patch = request?.patch;
+      if (!patch || typeof patch !== 'object' || !isSafeCharacterId(request.characterId)) {
+        event.returnValue = false;
+        return;
+      }
+      const settings = settingsStore.get();
+      const clean = {};
+      for (const key of ['zoom', 'rotationY']) if (Number.isFinite(patch[key])) clean[key] = patch[key];
+      if (settings.activeCharacterId === request.characterId) patchSettings(clean);
+      else if (Number.isFinite(clean.zoom) && characterRecord(request.characterId)) {
+        // A tray switch may have changed the active ID before beforeunload.
+        // Save the old character's scale without overwriting the new one's.
+        settingsStore.patch({ characterZooms: { ...settings.characterZooms, [request.characterId]: clean.zoom } });
+      }
+      event.returnValue = true;
+    } catch (error) {
+      log('ERROR', 'Could not flush interaction settings', String(error));
+      event.returnValue = false;
+    }
   });
 
   ipcMain.on('window:set-click-through', (_event, ignore) => {
@@ -1396,7 +1443,8 @@ function bindIpc() {
       return;
     }
     const settings = settingsStore.get();
-    mainWindow.setIgnoreMouseEvents(settings.clickThrough && Boolean(ignore), { forward: true });
+    latestClickThrough = settings.clickThrough && Boolean(ignore);
+    mainWindow.setIgnoreMouseEvents(latestClickThrough, { forward: true });
   });
 
   ipcMain.on('window:drag-start', (_event, point) => beginWindowDrag(point));
@@ -1592,14 +1640,12 @@ function bindIpc() {
     });
     if (confirmation.response !== 1) return { ok: false, canceled: true };
     const wasActive = settingsStore.get().activeCharacterId === id;
-    fs.rmSync(record.directory, { recursive: true, force: false });
-    if (wasActive) settingsStore.patch({ activeCharacterId: 'yachiyo' });
-    rebuildTrayMenu();
-    if (wasActive && mainWindow && !mainWindow.isDestroyed()) {
-      runtimeIsReady = false;
-      avatarViewportBounds = null;
-      mainWindow.webContents.reloadIgnoringCache();
+    if (wasActive) {
+      const result = await switchCharacter('yachiyo');
+      if (!result.ok) return result;
     }
+    fs.rmSync(record.directory, { recursive: true, force: false });
+    rebuildTrayMenu();
     return { ok: true };
   });
 
@@ -1607,6 +1653,8 @@ function bindIpc() {
     runtimeIsReady = true;
     updateAvatarViewportBounds(details?.avatarViewportBounds, true);
     log('INFO', 'Avatar runtime ready', details);
+    if (IS_SMOKE && modelSmokeRunning) return;
+    if (IS_SMOKE) modelSmokeRunning = true;
     if (IS_INTERACTION_TEST) {
       await runInteractionTimingTest(details);
       return;
@@ -1796,6 +1844,7 @@ function bindIpc() {
           && Boolean(dockState?.visible),
       };
       if (!uiTest.passed) throw new Error(`Companion UI test failed: ${JSON.stringify(uiTest)}`);
+      const characterLifecycleTest = await runCharacterLifecycleSmoke();
       fs.writeFileSync(
         path.join(artifacts, 'smoke-diagnostics.json'),
         `${JSON.stringify({
@@ -1806,6 +1855,7 @@ function bindIpc() {
           focusTest,
           petTest,
           uiTest,
+          characterLifecycleTest,
           screenshotPath,
           settingsScreenshotPath,
           dockScreenshotPath,
@@ -1821,6 +1871,18 @@ function bindIpc() {
     }
   });
 
+  ipcMain.on('runtime:setup-required', async () => {
+    if (!IS_ONBOARDING_TEST) return;
+    try {
+      clearTimeout(smokeTimer);
+      await runOnboardingTest();
+      app.exit(0);
+    } catch (error) {
+      log('ERROR', 'Onboarding test failed', String(error?.stack || error));
+      app.exit(1);
+    }
+  });
+
   ipcMain.on('runtime:telemetry', (_event, details) => {
     if (!details || typeof details !== 'object') return;
     latestRuntimeTelemetry = details;
@@ -1831,6 +1893,7 @@ function bindIpc() {
   });
 
   ipcMain.on('runtime:error', (_event, details) => {
+    resetRuntimeState();
     log('ERROR', 'Avatar runtime error', details);
     if (IS_AUTOMATED_TEST) {
       const artifacts = SMOKE_ARTIFACTS;
@@ -1843,6 +1906,69 @@ function bindIpc() {
       app.exit(1);
     }
   });
+}
+
+async function runOnboardingTest() {
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 180));
+  const moveOutsideAvatar = () => mainWindow.webContents.executeJavaScript(
+    `window.dispatchEvent(new PointerEvent('pointermove', { clientX: 2, clientY: 2, bubbles: true }))`, true);
+  await pause();
+  await moveOutsideAvatar();
+  await pause();
+  const setupClickable = !latestClickThrough && await mainWindow.webContents.executeJavaScript(
+    `document.querySelector('#setup-required').hidden === false`, true);
+  await mainWindow.webContents.executeJavaScript(`document.querySelector('#setup-open-characters').click()`, true);
+  await pause();
+  const libraryOpened = !latestClickThrough && await mainWindow.webContents.executeJavaScript(
+    `document.body.classList.contains('settings-open')`, true);
+  await mainWindow.webContents.executeJavaScript(`document.querySelector('#settings-close').click()`, true);
+  await moveOutsideAvatar();
+  await pause();
+  const setupStillClickable = !latestClickThrough;
+  await mainWindow.webContents.executeJavaScript(`window.__desktopPetShowFatal('自动测试：模型加载失败')`, true);
+  await moveOutsideAvatar();
+  await pause();
+  const fatalClickable = !latestClickThrough && await mainWindow.webContents.executeJavaScript(
+    `document.querySelector('#fatal').hidden === false`, true);
+  const result = { ok: Boolean(setupClickable && libraryOpened && setupStillClickable && fatalClickable),
+    setupClickable, libraryOpened, setupStillClickable, fatalClickable };
+  fs.mkdirSync(SMOKE_ARTIFACTS, { recursive: true });
+  fs.writeFileSync(path.join(SMOKE_ARTIFACTS, 'onboarding-diagnostics.json'), JSON.stringify(result, null, 2));
+  if (!result.ok) throw new Error(JSON.stringify(result));
+}
+
+async function runCharacterLifecycleSmoke() {
+  const originalId = settingsStore.get().activeCharacterId;
+  const source = characterRecord(originalId);
+  const targetId = 'smoke-switch-target';
+  const targetDirectory = path.join(userCharactersRoot(), targetId);
+  fs.mkdirSync(targetDirectory, { recursive: true });
+  fs.copyFileSync(path.join(source.directory, 'model.vrm'), path.join(targetDirectory, 'model.vrm'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(source.directory, 'character.json'), 'utf8'));
+  fs.writeFileSync(path.join(targetDirectory, 'character.json'), JSON.stringify({ ...manifest, id: targetId }));
+  const waitReady = async () => {
+    const deadline = Date.now() + 15000;
+    while (!runtimeIsReady && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+    if (!runtimeIsReady) throw new Error('Character reload did not become ready.');
+  };
+  patchSettings({ zoom: 0.8 });
+  const started = startAutonomousWalk();
+  const duplicateRejected = !startAutonomousWalk();
+  const first = await switchCharacter(targetId);
+  const stoppedForReload = !runtimeIsReady && !autonomyMove && !autonomyMoveTimer && !autonomyTimer;
+  const newCharacterScale = settingsStore.get().zoom === 0.35;
+  if (!first.ok) throw new Error(first.error);
+  await waitReady();
+  patchSettings({ zoom: 1.4 });
+  const second = await switchCharacter(originalId);
+  if (!second.ok) throw new Error(second.error);
+  await waitReady();
+  const restoredScale = settingsStore.get().zoom === 0.8;
+  const targetScaleRemembered = settingsStore.get().characterZooms[targetId] === 1.4;
+  const result = { ok: Boolean(started && duplicateRejected && stoppedForReload && newCharacterScale && restoredScale && targetScaleRemembered),
+    started, duplicateRejected, stoppedForReload, newCharacterScale, restoredScale, targetScaleRemembered };
+  if (!result.ok) throw new Error(`Character lifecycle failed: ${JSON.stringify(result)}`);
+  return result;
 }
 
 async function runInteractionTimingTest(details) {
@@ -2094,9 +2220,16 @@ async function runMotionTest(details) {
   const poseSnapshots = {};
   const secondaryPoseSnapshots = {};
   const garmentSnapshots = {};
+  const anatomySnapshots = {};
+  const surfaceIssues = [];
+  let fingerSamples = [], fingerCoverage = null;
+  const character = activeCharacterRecord().manifest;
+  const genericPmx = character.motionProfile.capabilities.includes('pmx-converted')
+    && character.motionProfile.profileId === 'generic-vrm';
   const captureGarmentState = async (label) => {
     const state = await mainWindow.webContents.executeJavaScript('window.__desktopPetGarmentContactSnapshot?.() ?? null', true);
     garmentSnapshots[label] = state;
+    if (genericPmx) surfaceIssues.push(...garmentSurfaceIssues(label, state));
     if (details.garmentContact?.enabled && !state?.enabled) {
       throw new Error(`Garment contact stopped during ${label}: ${JSON.stringify(state)}`);
     }
@@ -2133,10 +2266,18 @@ async function runMotionTest(details) {
     { name: 'sway', sampleAt: 2.15, duration: 6.20 },
   ];
   const motionOnly = String(process.env.YACHIYO_DESK_MOTION_ONLY || '').trim();
+  const requestedMotions = motionOnly.split(',').map(name => name.trim()).filter(Boolean);
   const motions = motionOnly
-    ? allMotions.filter((motion) => motionOnly.split(',').includes(motion.name))
+    ? allMotions.filter((motion) => requestedMotions.includes(motion.name))
     : allMotions;
   try {
+    if (!motions.length || requestedMotions.some(name => !allMotions.some(motion => motion.name === name))) {
+      throw new Error(`动作测试名称无效：${motionOnly}`);
+    }
+    if (character.sourceFormat === 'pmx' && !details.motionCapabilities?.includes('pmx-converted')) {
+      throw new Error('PMX 测试配置丢失了 pmx-converted capability。');
+    }
+    if (genericPmx && !details.anatomy?.calibrated) throw new Error('PMX 通用骨架约束没有实际参与测试。');
     // The runtime starts with one greeting. Let it complete before sampling the
     // neutral idle pose so each following reaction begins from a settled rig.
     // Greeting remains visible for 3.3 s and its CSS exit transition needs a
@@ -2160,6 +2301,11 @@ async function runMotionTest(details) {
     screenshots.idle = path.join(artifacts, 'motion-idle.png');
     fs.writeFileSync(screenshots.idle, idleImage.toPNG());
     await captureGarmentState('idle');
+    anatomySnapshots.idle = await mainWindow.webContents.executeJavaScript('window.__desktopPetAnatomySnapshot?.() ?? null', true);
+    if (genericPmx) {
+      fingerSamples = await mainWindow.webContents.executeJavaScript('window.__desktopPetFingerFlexionSamples?.() ?? []', true);
+      fingerCoverage = validateFingerFlexion(fingerSamples);
+    }
 
     const walkStart = mainWindow.getPosition();
     if (!startAutonomousWalk()) throw new Error('Autonomous walk could not find a valid desktop destination.');
@@ -2256,6 +2402,10 @@ async function runMotionTest(details) {
       fs.writeFileSync(screenshotPath, image.toPNG());
       screenshots[motion.name] = screenshotPath;
       await captureGarmentState(motion.name);
+      anatomySnapshots[motion.name] = await mainWindow.webContents.executeJavaScript('window.__desktopPetAnatomySnapshot?.() ?? null', true);
+      if (genericPmx && ['think', 'crouch', 'tiptoe'].includes(motion.name)) {
+        validateAnatomy(motion.name, anatomySnapshots[motion.name], anatomySnapshots.idle);
+      }
       poseSnapshots[motion.name] = await mainWindow.webContents.executeJavaScript(
         'window.__desktopPetPoseSnapshot?.() ?? null',
         true,
@@ -2294,7 +2444,11 @@ async function runMotionTest(details) {
     fs.writeFileSync(
       path.join(artifacts, 'motion-diagnostics.json'),
       `${JSON.stringify({
-        ok: true,
+        ok: surfaceIssues.length === 0,
+        motionPassed: true,
+        testedMotions: motions.map(motion => motion.name),
+        garmentSurfacePassed: surfaceIssues.length === 0,
+        anatomySnapshots, fingerSamples, fingerCoverage, surfaceIssues,
         timestamp: new Date().toISOString(),
         details,
         telemetry: latestRuntimeTelemetry,
@@ -2312,7 +2466,7 @@ async function runMotionTest(details) {
       'utf8',
     );
     log('INFO', 'Motion test completed', { screenshots });
-    app.exit(0);
+    app.exit(surfaceIssues.length ? 1 : 0);
   } catch (error) {
     log('ERROR', 'Motion test failed', String(error?.stack || error));
     const failedContact = await mainWindow.webContents.executeJavaScript(
@@ -2323,6 +2477,7 @@ async function runMotionTest(details) {
       error: String(error?.stack || error),
       garmentSnapshots,
       garmentContact: failedContact,
+      anatomySnapshots, fingerSamples, fingerCoverage, surfaceIssues,
     }, null, 2)}\n`, 'utf8');
     app.exit(1);
   }

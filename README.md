@@ -62,8 +62,8 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 打开 [Releases](https://github.com/earth34online/YachiyoDesk/releases/latest)，在 **Assets** 区域选择一个版本：
 
-- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.6-x64-Portable.exe)：下载后直接运行，不写入安装目录。
-- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.6-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
+- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.7-x64-Portable.exe)：下载后直接运行，不写入安装目录。
+- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.7-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
 - [`SHA256SUMS.txt`](https://github.com/earth34online/YachiyoDesk/releases/latest/download/SHA256SUMS.txt)：校验下载文件完整性。
 
 下载后的操作顺序：
@@ -80,23 +80,23 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 $dir = Join-Path $env:USERPROFILE 'Downloads\YachiyoDesk'
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
 $base = 'https://github.com/earth34online/YachiyoDesk/releases/latest/download'
-Invoke-WebRequest "$base/YachiyoDesk-1.0.6-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.6-x64-Portable.exe')
-Invoke-WebRequest "$base/YachiyoDesk-1.0.6-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.6-x64-Setup.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.7-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.7-x64-Portable.exe')
+Invoke-WebRequest "$base/YachiyoDesk-1.0.7-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.7-x64-Setup.exe')
 Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $dir 'SHA256SUMS.txt')
 Set-Location $dir
-Get-FileHash .\YachiyoDesk-1.0.6-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.6-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.7-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.7-x64-Setup.exe -Algorithm SHA256
 ```
 
 确认哈希与 `SHA256SUMS.txt` 一致后运行其一：
 
 ```powershell
-Start-Process .\YachiyoDesk-1.0.6-x64-Portable.exe
+Start-Process .\YachiyoDesk-1.0.7-x64-Portable.exe
 # 或者
-Start-Process .\YachiyoDesk-1.0.6-x64-Setup.exe
+Start-Process .\YachiyoDesk-1.0.7-x64-Setup.exe
 ```
 
-`/releases/latest` 页面地址固定指向最新正式版本；Release asset 的文件名包含版本号，因此脚本中的 `1.0.6` 需要在下一次正式发布时同步更新。
+`/releases/latest` 页面地址固定指向最新正式版本；Release asset 的文件名包含版本号，因此脚本中的 `1.0.7` 需要在下一次正式发布时同步更新。
 
 首次公开版启动时不会内置八千代模型。请点击“打开角色库并导入”，导入你有权使用的 `.vrm`，或导入 `.pmx` 让本机转换器生成 VRM；之后在角色库中点击“使用”。模型会保存在 `%APPDATA%\YachiyoDesk\characters`，下次启动会自动使用已选择的角色。新导入角色首次启用时按 35% 显示；之后每个角色分别记住手动调整的比例，不会覆盖八千代已有的比例。透明置顶窗口和开机启动设置可在面板中调整。
 
@@ -186,13 +186,39 @@ npm run electron:dev
 
 不要把模型放进 Git。将你从原作者合法获取的 `model.vrm` 通过软件“角色库 → 导入 VRM”导入；或者使用 PMX 导入功能。开发者也可以在本地构建前将自己的模型放到 `characters/yachiyo/model.vrm`，但该文件会被 `.gitignore` 忽略，且不得提交或发布。公开构建故意不包含模型，首次运行的引导页就是预期行为。
 
-PMX 转换器默认搜索常见的 Blender 4.x 安装位置，也可以显式设置：
+PMX 转换需要 Blender 4.2+（4.x）及官方仓库的 **MMD Tools**、**VRM format** 扩展。完整安装步骤与资源目录结构见 [PMX 安装契约](docs/INSTALLATION.md#4-导入-pmx)。转换器会搜索工作区 `.tools` 和 `%ProgramFiles%\Blender Foundation\Blender 4.x`，也可以显式设置：
 
 ```powershell
 $env:YACHIYO_BLENDER_PATH = 'C:\Program Files\Blender Foundation\Blender 4.5\blender.exe'
+$env:YACHIYO_BLENDER_USER_RESOURCES = Join-Path $env:APPDATA 'Blender Foundation\Blender\4.5'
 ```
 
 转换时请把 PMX、同目录的纹理、`.sph/.spa` 球形贴图和 toon 纹理等依赖文件保留在原目录；转换完成后只将生成的 VRM 复制到应用数据目录，原始 PMX 不会被仓库收集。
+
+### 本地冒烟测试
+
+`npm run smoke` 验证公开版无模型启动、导入引导和错误提示的点击状态，不需要角色资产。`npm run smoke:model` 验证有模型运行；必须提供本机有权使用的 VRM，模型只复制进隔离测试目录，不进入发布资源：
+
+```powershell
+$env:YACHIYO_DESK_TEST_MODEL = 'C:\你的本地模型目录\model.vrm'
+$env:YACHIYO_DESK_SMOKE_DIR = Join-Path $env:TEMP 'YachiyoDesk-model-smoke'
+npm run smoke:model
+```
+
+缺少测试模型时，有模型测试明确失败并给出配置方法，不会把“没有测试资源”当作通过。所有自动测试都使用独立用户数据目录，不修改正常应用的角色库、专注状态或开机启动项。测试目录只收集 `tests/**/*.test.ts`，历史诊断与废弃实验不参与常规验证。
+
+动作检查使用 `--motion-test`。测试 PMX 转换后的 VRM 时，必须保留原导入角色的 `character.json`，或显式设置 PMX 格式；不能仅凭文件的 `.vrm` 后缀判断动作路径：
+
+```powershell
+$env:YACHIYO_DESK_TEST_MODEL = 'C:\你的本地模型目录\model.vrm'
+$env:YACHIYO_DESK_TEST_MANIFEST = 'C:\你的本地模型目录\character.json'
+$env:YACHIYO_DESK_TEST_FORMAT = 'pmx'
+$env:YACHIYO_DESK_SMOKE_DIR = Join-Path $env:TEMP 'YachiyoDesk-pmx-motion'
+npm run build:renderer
+npx electron . --motion-test
+```
+
+没有 manifest 时可以省略 `YACHIYO_DESK_TEST_MANIFEST`，但需保留 `YACHIYO_DESK_TEST_FORMAT=pmx`；这会使用通用 PMX 配置。测试检查实际启用的 PMX 路径、关节方向、脚部支点和手指屈曲，并单独记录衣物三角形残留相交及接触覆盖状态。衣物检查不通过时整体退出码为 1，诊断中的 `motionPassed` 仍可说明骨架动作是否通过。残留相交数不能等同于穿透深度或可见面积；还需结合截图验收。版本改进见 [变更记录](CHANGELOG.md)。
 
 ### 构建发布包
 

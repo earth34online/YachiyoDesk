@@ -30,12 +30,19 @@ function resolvePmxConverter(options = {}) {
   const resourcesPath = options.resourcesPath || process.resourcesPath;
   const portableDirectory = options.portableDirectory || process.env.PORTABLE_EXECUTABLE_DIR;
   const blenderName = path.join('blender-4.5.13-windows-x64', 'blender.exe');
+  const programFiles = options.programFiles || process.env.ProgramFiles;
+  const installationRoot = programFiles && path.join(programFiles, 'Blender Foundation');
+  const installedBlenders = installationRoot && fs.existsSync(installationRoot)
+    ? fs.readdirSync(installationRoot).filter((name) => /^Blender 4\.\d+(?:\D.*)?$/.test(name))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+      .map((name) => path.join(installationRoot, name, 'blender.exe')) : [];
   const blenderCandidates = [
     options.blenderPath,
     process.env.YACHIYO_BLENDER_PATH,
     path.resolve(moduleDirectory, '..', '..', '.tools', blenderName),
     resourcesPath && path.resolve(resourcesPath, '..', '..', '..', '..', '.tools', blenderName),
     portableDirectory && path.resolve(portableDirectory, '..', '..', '.tools', blenderName),
+    ...installedBlenders,
   ];
   const scriptCandidates = [
     options.scriptPath,
@@ -46,14 +53,36 @@ function resolvePmxConverter(options = {}) {
   const blenderPath = uniqueExistingFile(blenderCandidates);
   const scriptPath = uniqueExistingFile(scriptCandidates);
   if (!blenderPath) {
-    throw new Error('没有找到本机 PMX 转换引擎。请保留 F:\\create\\.tools\\blender-4.5.13-windows-x64，或设置 YACHIYO_BLENDER_PATH。');
+    throw new Error('没有找到 Blender 4.2+ 转换引擎。请安装 Blender 4.x 并设置 YACHIYO_BLENDER_PATH；也会搜索 Program Files\\Blender Foundation 和工作区 .tools。');
   }
   if (!scriptPath) throw new Error('PMX 转换脚本缺失，请重新解压或重新构建 YachiyoDesk。');
   const inferredToolsRoot = path.dirname(path.dirname(blenderPath));
+  const isolatedResources = path.join(inferredToolsRoot, 'blender-user');
+  const version = /Blender (4\.\d+)/i.exec(path.dirname(blenderPath))?.[1];
+  const appData = options.appData || process.env.APPDATA;
+  const standardRoot = appData && path.join(appData, 'Blender Foundation', 'Blender');
+  const standardVersions = standardRoot && fs.existsSync(standardRoot)
+    ? fs.readdirSync(standardRoot).filter((name) => /^4\.\d+$/.test(name))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true })) : [];
+  const standardResources = standardRoot && path.join(standardRoot, version || standardVersions[0] || '4.5');
   const blenderUserResources = options.blenderUserResources
     || process.env.YACHIYO_BLENDER_USER_RESOURCES
-    || path.join(inferredToolsRoot, 'blender-user');
+    || (fs.existsSync(isolatedResources) ? isolatedResources : standardResources || isolatedResources);
   return { blenderPath, scriptPath, blenderUserResources };
+}
+
+function inspectConverterDependencies(converter) {
+  const root = converter.blenderUserResources;
+  const missing = ['mmd_tools', 'vrm'].filter((name) => {
+    const directory = path.join(root, 'extensions', 'blender_org', name);
+    return !fs.existsSync(path.join(directory, '__init__.py'))
+      || !fs.existsSync(path.join(directory, 'blender_manifest.toml'));
+  });
+  if (missing.length) {
+    throw new Error(`PMX 转换依赖缺失：${missing.join('、')}。当前 Blender 资源目录：${root}。`
+      + '请在 Blender 的 Get Extensions 中从官方仓库安装 MMD Tools 和 VRM format，'
+      + '并将 YACHIYO_BLENDER_USER_RESOURCES 指向包含 extensions\\blender_org 的资源目录；详见 docs/INSTALLATION.md。');
+  }
 }
 
 function validatePmxSource(sourcePath) {
@@ -113,6 +142,7 @@ function describePmxConversionFailure(error) {
 async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs = DEFAULT_TIMEOUT_MS, converter }) {
   validatePmxSource(sourcePath);
   const resolvedConverter = converter || resolvePmxConverter();
+  inspectConverterDependencies(resolvedConverter);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   const runAttempt = (compatibilityMode) => new Promise((resolve, reject) => {
     const child = spawn(resolvedConverter.blenderPath, [
@@ -188,5 +218,6 @@ module.exports = {
   convertPmxToVrm,
   describePmxConversionFailure,
   resolvePmxConverter,
+  inspectConverterDependencies,
   validatePmxSource,
 };

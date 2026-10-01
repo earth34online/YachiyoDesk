@@ -25,6 +25,8 @@ export class InteractionController {
   private hoverHit: THREE.Intersection | null = null;
   private lastIgnoreState: boolean | null = null;
   private persistenceTimer = 0;
+  private pendingSettings: Partial<AppSettings> = {};
+  private readonly characterId: string;
   private windowMoveTimer = 0;
   private pendingWindowPoint: { screenX: number; screenY: number } | null = null;
   private pokeTimes: number[] = [];
@@ -35,17 +37,26 @@ export class InteractionController {
     this.runtime = runtime;
     this.ui = ui;
     this.settings = settings;
+    this.characterId = settings.activeCharacterId;
     this.bindEvents();
   }
 
-  setSettings(settings: AppSettings): void {
-    this.settings = settings;
-    if (!settings.clickThrough) this.setIgnored(false);
+  setSettings(settings: AppSettings): AppSettings {
+    this.settings = { ...settings, ...this.pendingSettings };
+    this.reevaluateClickThrough();
+    return this.settings;
+  }
+
+  previewSettings(patch: Partial<AppSettings>): AppSettings {
+    this.cancelPendingSettings(patch);
+    return this.setSettings({ ...this.settings, ...patch });
   }
 
   reevaluateClickThrough(): void {
     this.setIgnored(this.settings.clickThrough
       && !this.hoverHit
+      && !this.drag
+      && !this.ui.isBlockingOverlayOpen()
       && !this.ui.isSettingsOpen()
       && !this.ui.isCompanionDockOpen());
   }
@@ -92,7 +103,7 @@ export class InteractionController {
       return;
     }
 
-    if (this.ui.isSettingsOpen()) {
+    if (this.ui.isSettingsOpen() || this.ui.isBlockingOverlayOpen()) {
       this.ui.setCompanionHover(false);
       this.setIgnored(false);
       return;
@@ -102,12 +113,12 @@ export class InteractionController {
     // An actual press/wheel/context action below is the intentional stop signal.
     document.body.classList.toggle('over-avatar', Boolean(this.hoverHit));
     this.ui.setCompanionHover(Boolean(this.hoverHit));
-    this.setIgnored(this.settings.clickThrough && !this.hoverHit && !this.ui.isCompanionDockOpen());
+    this.reevaluateClickThrough();
   }
 
   private onPointerDown(event: PointerEvent): void {
     if (this.ui.isCompanionDockTarget(event.target)) return;
-    if (this.ui.isSettingsOpen()) return;
+    if (this.ui.isSettingsOpen() || this.ui.isBlockingOverlayOpen()) return;
     const hit = this.runtime.hitTest(event.clientX, event.clientY);
     if (!hit) return;
     if (event.button === 2) {
@@ -200,7 +211,7 @@ export class InteractionController {
   }
 
   private onWheel(event: WheelEvent): void {
-    if (this.ui.isSettingsOpen() || !this.runtime.hitTest(event.clientX, event.clientY)) return;
+    if (this.ui.isSettingsOpen() || this.ui.isBlockingOverlayOpen() || !this.runtime.hitTest(event.clientX, event.clientY)) return;
     const factor = Math.exp(-event.deltaY * 0.0012);
     window.yachiyoDesk.noteUserActivity();
     const zoom = clamp(this.settings.zoom * factor, 0.10, 2.4);
@@ -213,7 +224,7 @@ export class InteractionController {
   }
 
   private onContextMenu(event: MouseEvent): void {
-    if (this.ui.isSettingsOpen()) return;
+    if (this.ui.isSettingsOpen() || this.ui.isBlockingOverlayOpen()) return;
     if (!this.runtime.hitTest(event.clientX, event.clientY)) return;
     event.preventDefault();
     window.yachiyoDesk.noteUserActivity();
@@ -226,6 +237,7 @@ export class InteractionController {
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key === '0') {
+      this.cancelPendingSettings({ zoom: 0.35, rotationY: 0 });
       this.runtime.resetPose();
       this.settings = { ...this.settings, zoom: 0.35, rotationY: 0 };
       this.runtime.setZoom(0.35);
@@ -243,10 +255,37 @@ export class InteractionController {
   }
 
   private schedulePersistence(patch: Partial<AppSettings>): void {
+    this.pendingSettings = { ...this.pendingSettings, ...patch };
     window.clearTimeout(this.persistenceTimer);
     this.persistenceTimer = window.setTimeout(() => {
-      void window.yachiyoDesk.updateSettings(patch);
+      this.persistenceTimer = 0;
+      const pending = this.takePendingSettings();
+      void window.yachiyoDesk.updateSettings(pending);
     }, 280);
+  }
+
+  cancelPendingSettings(patch: Partial<AppSettings>): void {
+    for (const key of Object.keys(patch) as Array<keyof AppSettings>) delete this.pendingSettings[key];
+    if (Object.keys(this.pendingSettings).length === 0) {
+      window.clearTimeout(this.persistenceTimer);
+      this.persistenceTimer = 0;
+    }
+  }
+
+  private takePendingSettings(): Partial<AppSettings> {
+    window.clearTimeout(this.persistenceTimer);
+    this.persistenceTimer = 0;
+    const pending = this.pendingSettings;
+    this.pendingSettings = {};
+    return pending;
+  }
+
+  flushBeforeUnload(): boolean {
+    const pending = this.takePendingSettings();
+    if (Object.keys(pending).length === 0) return true;
+    const saved = window.yachiyoDesk.flushInteractionSettings(pending, this.characterId);
+    if (!saved) this.pendingSettings = pending;
+    return saved;
   }
 
   private queueWindowDrag(screenX: number, screenY: number): void {

@@ -14,8 +14,8 @@
 下载后建议先校验 SHA-256：
 
 ```powershell
-Get-FileHash .\YachiyoDesk-1.0.6-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.6-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.7-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.7-x64-Setup.exe -Algorithm SHA256
 ```
 
 将输出与 Release 中的 `SHA256SUMS.txt` 对比。GitHub 的 `/releases/latest/download/...` 链接会始终指向最新正式 Release，适合脚本或收藏使用。
@@ -57,22 +57,40 @@ VRM 是推荐格式。将你有权使用的 VRM 文件直接交给导入按钮�
 
 ## 4. 导入 PMX
 
-PMX 需要本机 Blender 4.x。转换器会尝试映射人体骨骼、材质、纹理、Morph、刚体和 SpringBone；由于 PMX 与 VRM 的骨骼、toon 材质和物理模型并非一一对应，复杂模型不保证完全等价。
+PMX 需要本机 Blender 4.2 或更新的 4.x 版本，以及 **MMD Tools** 和 **VRM format** 两个扩展。公开安装包不捆绑 Blender 或扩展。已在本项目验证的组合是 Blender 4.5.13 LTS、MMD Tools 4.5.13、VRM format 4.5.0；其他版本需要另行验证。转换器会尝试映射人体骨骼、材质、纹理、Morph、刚体和 SpringBone；由于两种格式并非一一对应，复杂模型不保证完全等价。
 
 ### Blender 配置
 
-优先用环境变量明确指定 Blender：
+1. 安装 Blender，并在 **Edit → Preferences → Get Extensions** 中从官方 `extensions.blender.org` 仓库安装 [MMD Tools](https://extensions.blender.org/add-ons/mmd-tools/) 和 [VRM format](https://extensions.blender.org/add-ons/vrm/)。离线安装可以使用菜单的 **Install from Disk**，但必须选择同一官方仓库作为安装目标，确保模块位于 `extensions/blender_org`；装到其他仓库或使用旧式 Add-on 目录不符合当前转换器契约。操作入口见 [Blender 4.5 扩展安装说明](https://docs.blender.org/manual/en/4.5/editors/preferences/extensions.html)。
+2. 确认资源目录包含下面的结构（每个扩展目录都应有 `__init__.py` 与 `blender_manifest.toml`）：
+
+```text
+<资源目录>/
+  extensions/blender_org/mmd_tools/
+  extensions/blender_org/vrm/
+```
+
+3. 用环境变量明确指定 Blender 和资源目录。普通 Windows 安装通常使用以下目录；如果你使用其他版本或自定义路径，请替换为实际位置：
 
 ```powershell
 $env:YACHIYO_BLENDER_PATH = 'C:\Program Files\Blender Foundation\Blender 4.5\blender.exe'
+$env:YACHIYO_BLENDER_USER_RESOURCES = Join-Path $env:APPDATA 'Blender Foundation\Blender\4.5'
 ```
 
-也可以将 Blender 放在转换器支持的标准安装位置。确认命令：
+资源目录含义见 [Blender 目录布局说明](https://docs.blender.org/manual/en/4.5/advanced/blender_directory_layout.html)。转换子进程通过 `BLENDER_USER_RESOURCES` 使用上述目录；不会向系统 Python 安装包。
+
+确认命令：
 
 ```powershell
 Test-Path $env:YACHIYO_BLENDER_PATH
 & $env:YACHIYO_BLENDER_PATH --version
+Test-Path (Join-Path $env:YACHIYO_BLENDER_USER_RESOURCES 'extensions\blender_org\mmd_tools\__init__.py')
+Test-Path (Join-Path $env:YACHIYO_BLENDER_USER_RESOURCES 'extensions\blender_org\vrm\__init__.py')
 ```
+
+这些 `$env:` 设置只影响当前 PowerShell 及其子进程。请从同一终端启动 YachiyoDesk；如需通过桌面快捷方式长期启动，请在 Windows 用户环境变量中保存这两项，并重新启动应用。
+
+未显式指定时，程序依次寻找工作区 `.tools`、便携目录附近的 `.tools` 和 `%ProgramFiles%\Blender Foundation\Blender 4.x\blender.exe`。资源优先使用相邻的 `blender-user` 隔离目录，否则使用匹配版本的 `%APPDATA%\Blender Foundation\Blender\4.x`。转换前会检查两个扩展，缺失时直接报告名称、实际资源目录和配置方法，不启动长时间转换。运行过程中扩展加载失败仍会记录在转换报告中。
 
 ### PMX 文件准备
 

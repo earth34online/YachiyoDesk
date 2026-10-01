@@ -207,26 +207,10 @@ class SettingsStore {
         parsed.zoom = DEFAULT_SETTINGS.zoom;
         this.needsWrite = true;
       }
-      // Version 13 restores the explicitly requested login startup setting for
-      // profiles created by older builds where the default was still false.
-      if (Number(parsed.schemaVersion) < 13) {
-        parsed.autoStart = true;
-        this.needsWrite = true;
-      }
-      // Version 14 applies the user's explicit request to stop launching
-      // YachiyoDesk with Windows. This migration also clears profiles that had
-      // inherited the former default instead of requiring a manual toggle.
-      if (Number(parsed.schemaVersion) < 14) {
-        parsed.autoStart = false;
-        this.needsWrite = true;
-      }
-      // Version 15 restores login startup after the user reversed the earlier
-      // version-14 request. Apply it once to every existing profile so a stale
-      // false value cannot silently remove the Windows login entry again.
-      if (Number(parsed.schemaVersion) < 15) {
-        parsed.autoStart = true;
-        this.needsWrite = true;
-      }
+      // Preserve the saved login-startup choice in every schema. The former
+      // 13/14/15 migrations reflected one machine's changing preference and
+      // must not overwrite another user's explicit true/false. Missing values
+      // receive DEFAULT_SETTINGS.autoStart in sanitizeSettings below.
       const sanitized = sanitizeSettings(parsed);
       if (!Number.isFinite(parsed.schemaVersion) || parsed.schemaVersion < DEFAULT_SETTINGS.schemaVersion) {
         this.needsWrite = true;

@@ -120,13 +120,52 @@ describe('main-process settings validation', () => {
 
       const disabledLegacyAutostartPath = path.join(directory, 'v12-autostart.json');
       fs.writeFileSync(disabledLegacyAutostartPath, JSON.stringify({ schemaVersion: 12, autoStart: false }), 'utf8');
-      expect(new SettingsStore(disabledLegacyAutostartPath).get().autoStart).toBe(true);
+      expect(new SettingsStore(disabledLegacyAutostartPath).get().autoStart).toBe(false);
 
       const disabledPreviousProfilePath = path.join(directory, 'v14-autostart.json');
       fs.writeFileSync(disabledPreviousProfilePath, JSON.stringify({ schemaVersion: 14, autoStart: false }), 'utf8');
       const restoredProfile = new SettingsStore(disabledPreviousProfilePath).get();
       expect(restoredProfile.schemaVersion).toBe(15);
-      expect(restoredProfile.autoStart).toBe(true);
+      expect(restoredProfile.autoStart).toBe(false);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([undefined, 1, 12, 13, 14, 15])('preserves both saved autostart choices for schema %s after migration and reopening', (schemaVersion) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yachiyo-autostart-'));
+    try {
+      for (const autoStart of [false, true]) {
+        const file = path.join(directory, `${autoStart}.json`);
+        fs.writeFileSync(file, JSON.stringify({ schemaVersion, autoStart }), 'utf8');
+        expect(new SettingsStore(file).get().autoStart).toBe(autoStart);
+        expect(JSON.parse(fs.readFileSync(file, 'utf8')).autoStart).toBe(autoStart);
+        expect(new SettingsStore(file).get().autoStart).toBe(autoStart);
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the default only when an old profile has no autostart choice', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yachiyo-autostart-missing-'));
+    try {
+      for (const schemaVersion of [undefined, 1, 12, 13, 14, 15]) {
+        const file = path.join(directory, `${schemaVersion}.json`);
+        fs.writeFileSync(file, JSON.stringify({ schemaVersion }), 'utf8');
+        expect(new SettingsStore(file).get().autoStart).toBe(true);
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps autostart enabled for a newly created profile', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yachiyo-autostart-new-'));
+    try {
+      const file = path.join(directory, 'new.json');
+      expect(new SettingsStore(file).get().autoStart).toBe(true);
+      expect(JSON.parse(fs.readFileSync(file, 'utf8')).autoStart).toBe(true);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }
