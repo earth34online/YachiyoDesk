@@ -1,5 +1,7 @@
 # 架构与扩展点
 
+本文对应 1.0.9（1.x 收官版），维护日期为 2026-10-20；验证和交付状态见 [版本记录](RELEASE_20261020.md)。
+
 YachiyoDesk 将“桌面窗口控制”“角色资产管理”“VRM 运行时”“动作系统”和“UI”分层。这样八千代的特调参数可以留在角色 manifest 中，未来导入的任意 VRM/PMX 仍然走通用标准。
 
 ## 分层关系
@@ -14,6 +16,7 @@ flowchart TB
     Import --> UserData[%APPDATA%/YachiyoDesk/characters]
     Runtime --> Animator[src/ProceduralAnimator.ts<br/>通用人体动作]
     Runtime --> Spring[VRM SpringBone<br/>头发与衣物物理]
+    Runtime --> PMX[src/pmxPhysics.ts<br/>原始 PMX 刚体与关节]
     Animator --> Profile[character.json motionProfile<br/>通用标准 + 角色特调]
 ```
 
@@ -41,7 +44,7 @@ flowchart TB
 4. 计算模型高度、相机距离、脚底锚点和点击碰撞网格；
 5. 将角色 motion profile 应用到手掌、肘部、步态和 SpringBone；
 6. 每帧更新表情、视线、动作、物理和性能统计；
-7. 对可识别且规模在预算内的 PMX 衣物可创建保留原材质/UV 的运行时网格副本，由 `src/garmentContact.ts` 进行有界的身体三角网格接触；不支持或超预算时显示原始蒙皮网格；
+7. 对有可核验原始文件的通用 PMX，使用 `src/pmxPhysics.ts` 桥接源骨架、刚体和关节；未接入原始物理时保留已有 VRM SpringBone 与有界网格接触兼容路径；
 8. 在掉帧时降低像素倍率，不替换原始模型纹理。
 
 没有模型时，runtime 不会尝试加载空 URL，而是触发首次导入引导；导入角色并切换后，窗口重新加载正常运行时。
@@ -59,6 +62,22 @@ flowchart TB
 通用 profile 是所有导入角色的安全基础；内置八千代使用 `characters/yachiyo/character.json` 的 `yachiyo-long-garment-v1`。通过 UI 导入时，`electron/recommended-model.cjs` 只对已验证的原作者 VRM/PMX 文件哈希启用对应的八千代专用 profile；原作者 PMX 仍保留 PMX 手腕/腿部坐标系补偿。其他文件无论名称是否包含“八千代”，都使用通用 profile。
 
 PMX 转换在 `converter/skin_binding.py` 审核骨骼权重，仅修补相邻权重归属明确的孤立空洞；复杂边界记录警告。`conversion-report.json` 保留材质、纹理、骨骼、蒙皮和服装物理诊断。`garmentContact.ts` 处理的是运行时可识别衣物与身体的局部接触，不是完整的布料自碰撞或衣物层间模拟；不能据此宣称任意模型零穿模。
+
+## 成品中的衣物接触实现
+
+1.0.9 优先保留通用 PMX 原生的刚体、关节、碰撞分组和约束。VRM 继续拥有渲染、表情和人体动作；不可见的 PMX 实例只计算物理，不加载第二套纹理或网格。按绑定位置映射骨骼，物理与视角/缩放分开，并避免与 VRM SpringBone 重复驱动。新旧路径互斥，八千代保持原配置；完整适配依据见 [AIRI 审查记录](AIRI_REVIEW_20261020.md)。
+
+`src/contactSkinning.ts` 采样当前骨骼、绑定矩阵和 Morph 的 CPU 蒙皮结果；`src/bodyContactEnvelope.ts` 提供身体支撑几何；`src/garmentContact.ts` 使用身体三角网格查询并输出保持原材质与 UV 的衣物副本。
+
+`src/garmentIntegrity.ts` 在显示前检查顶点修正幅度、固定点、边长和三角面面积。允许的修正比例取从原始蒙皮开始的连续区间；多个面的约束共同收紧该区间，最终再次核验几何。BVH 查询返回结果还会确认实际距离，避免远处叶节点成为接触。
+
+通用骨骼与已验证八千代的专属 profile 分开选择，角色 manifest 和原始资产由各自导入流程维护。测试服装的名称、材质名称或 ID 不参与物理参数选择。
+
+## 两版同步与文档维护
+
+公开源码是共享实现的维护入口。`scripts/sync-local.cjs` 同步源码、测试、转换器、依赖、公共脚本及文档，同时保留桌面项目的本地角色和资产准备脚本。
+
+同步后执行两份项目的 `npm run verify`；打包后再核对实际程序版本、共享核心文件与角色哈希。详细操作见 [维护指南](MAINTENANCE.md)。
 
 ## 角色 manifest
 

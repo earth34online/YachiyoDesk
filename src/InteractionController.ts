@@ -66,16 +66,31 @@ export class InteractionController {
     window.addEventListener('pointerdown', (event) => this.onPointerDown(event), { passive: false });
     window.addEventListener('pointerup', (event) => this.onPointerUp(event), { passive: false });
     window.addEventListener('pointercancel', () => this.endDrag());
+    window.addEventListener('lostpointercapture', (event) => {
+      if (this.drag?.pointerId === event.pointerId) this.endDrag();
+    });
+    window.addEventListener('pointerout', (event) => {
+      if (!event.relatedTarget && !this.drag) this.clearHover();
+    });
     window.addEventListener('wheel', (event) => this.onWheel(event), { passive: false });
     window.addEventListener('contextmenu', (event) => this.onContextMenu(event));
     window.addEventListener('blur', () => {
       this.endDrag();
+      this.clearHover();
       // Pointer events cannot cross a BrowserWindow boundary. Closing on blur
       // covers clicks on another app/desktop as well as clicks inside our own
       // transparent surface, so the panel never depends on one event path.
       if (this.ui.isSettingsOpen()) this.ui.hideSettings();
     });
     window.addEventListener('keydown', (event) => this.onKeyDown(event));
+  }
+
+  private clearHover(): void {
+    this.hoverHit = null;
+    document.body.classList.remove('over-avatar');
+    this.runtime.setPointer(0, 0, false);
+    this.ui.setCompanionHover(false);
+    this.reevaluateClickThrough();
   }
 
   private onPointerMove(event: PointerEvent): void {
@@ -162,20 +177,21 @@ export class InteractionController {
 
   private endDrag(screenX?: number, screenY?: number): void {
     if (!this.drag) return;
-    if (this.drag.mode === 'move') {
+    const drag = this.drag;
+    this.drag = null; // Release ownership before an explicit capture release can reenter.
+    if (drag.mode === 'move') {
       this.runtime.setDragging(false);
       if (this.windowMoveTimer) window.clearTimeout(this.windowMoveTimer);
       this.windowMoveTimer = 0;
       this.pendingWindowPoint = null;
       if (!this.settings.lockPosition) {
         window.yachiyoDesk.endWindowDrag(
-          screenX ?? this.drag.lastScreenX,
-          screenY ?? this.drag.lastScreenY,
+          screenX ?? drag.lastScreenX,
+          screenY ?? drag.lastScreenY,
         );
       }
     }
-    try { this.canvas.releasePointerCapture?.(this.drag.pointerId); } catch { /* already released */ }
-    this.drag = null;
+    try { this.canvas.releasePointerCapture?.(drag.pointerId); } catch { /* already released */ }
     document.body.classList.remove('dragging-avatar');
     this.reevaluateClickThrough();
   }

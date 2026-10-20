@@ -13,6 +13,9 @@ import { shouldCombineSkeletons } from './skin-policy';
 import { GarmentContactSolver } from './garmentContact';
 import { alphaFootprint } from './avatar-footprint';
 import { prepareGenericPmxSpringSpace } from './springContactSpace';
+import { PmxPhysics } from './pmxPhysics';
+import { rigHitZone } from './interactionZone';
+import { updateSkinnedInteractionBounds } from './interactionBounds';
 import type {
   AppSettings,
   AvatarViewportBounds,
@@ -32,9 +35,38 @@ interface RuntimeCallbacks {
   onFatal: (error: Error) => void;
   onSetupRequired?: () => void;
   onViewportBounds?: (bounds: AvatarViewportBounds) => void;
+  onFrame?: () => void;
 }
 
 type UpdatableMaterial = THREE.Material & { update?: (delta: number) => void };
+
+function disposeModelScene(scene: THREE.Object3D): void {
+  const skeletons = new Set<THREE.Skeleton>();
+  const bitmaps = new Set<ImageBitmap>();
+  const collectTexture = (value: unknown) => {
+    if (!(value as THREE.Texture | null)?.isTexture) return;
+    const image = (value as THREE.Texture).source.data;
+    for (const entry of Array.isArray(image) ? image : [image]) {
+      if (typeof ImageBitmap !== 'undefined' && entry instanceof ImageBitmap) bitmaps.add(entry);
+    }
+  };
+  scene.traverse(object => {
+    if ((object as THREE.SkinnedMesh).isSkinnedMesh) skeletons.add((object as THREE.SkinnedMesh).skeleton);
+    const materials = (object as THREE.Mesh).material;
+    for (const material of Array.isArray(materials) ? materials : materials ? [materials] : []) {
+      Object.values(material).forEach(collectTexture);
+      if ((material as THREE.ShaderMaterial).uniforms) {
+        Object.values((material as THREE.ShaderMaterial).uniforms).forEach(uniform => collectTexture(uniform.value));
+      }
+    }
+  });
+  for (const skeleton of skeletons) skeleton.dispose();
+  VRMUtils.deepDispose(scene);
+  // Texture.dispose releases WebGL resources, but not ImageBitmap's decoded
+  // CPU pixels. Close only when this owned model exits, never after upload:
+  // a live model still needs its images for WebGL context recovery.
+  for (const bitmap of bitmaps) bitmap.close();
+}
 
 export class AvatarRuntime {
   private readonly canvas: HTMLCanvasElement;
@@ -50,6 +82,10 @@ export class AvatarRuntime {
   private vrm: VRM | null = null;
   private animator: ProceduralAnimator | null = null;
   private garmentContact: GarmentContactSolver | null = null;
+  private pmxPhysics: PmxPhysics | null = null;
+  private pmxPhysicsFailure = '';
+  private loading: Promise<void> | null = null;
+  private loadSequence = 0;
   private settings: AppSettings;
   private modelHeight = 1.65;
   private modelWidth = 0.55;
@@ -64,10 +100,12 @@ export class AvatarRuntime {
   private lastRenderedTimestamp = 0;
   private nextAdaptiveAssessment = 8000;
   private renderedFrameCount = 0;
+  private interactionBoundsFrame = -1;
   private adaptiveScale = 1;
   private readonly frameDurations: number[] = [];
   private started = false;
   private disposed = false;
+  private suspended = false;
   private diagnosticBindPose = false;
   private footprintTarget: THREE.WebGLRenderTarget | null = null;
   private footprintPixels = new Uint8Array(0);
@@ -82,6 +120,8 @@ export class AvatarRuntime {
     this.bootstrap = bootstrap;
     this.callbacks = callbacks;
     this.settings = bootstrap.settings;
+    this.pmxPhysicsFailure = bootstrap.pmxPhysicsError ?? '';
+    this.suspended = bootstrap.stageSuspended ?? false;
     this.targetRotationY = this.settings.rotationY;
     this.currentRotationY = this.settings.rotationY;
 
@@ -111,7 +151,16 @@ export class AvatarRuntime {
     this.resize();
   }
 
-  async load(): Promise<void> {
+  load(): Promise<void> {
+    if (this.disposed || this.started) return Promise.resolve();
+    if (!this.loading) this.loading = this.loadModel().finally(() => { this.loading = null; });
+    return this.loading;
+  }
+
+  private async loadModel(): Promise<void> {
+    const sequence = ++this.loadSequence;
+    const current = () => !this.disposed && sequence === this.loadSequence;
+    let detachedScene: THREE.Object3D | null = null;
     try {
       const modelUrl = this.bootstrap.modelUrl;
       if (!modelUrl) {
@@ -127,12 +176,20 @@ export class AvatarRuntime {
           modelUrl,
           resolve,
           (event) => {
+            if (!current()) return;
             const progress = event.total > 0 ? event.loaded / event.total : 0;
             this.callbacks.onProgress(8 + progress * 68, `载入角色模型 ${Math.round(progress * 100)}%`);
           },
           reject,
         );
       });
+
+      detachedScene = gltf.scene;
+      if (!current()) {
+        disposeModelScene(detachedScene);
+        detachedScene = null;
+        return;
+      }
 
       const vrm = gltf.userData.vrm as VRM | undefined;
       if (!vrm) throw new Error('该文件未包含可识别的 VRM 数据。');
@@ -149,14 +206,25 @@ export class AvatarRuntime {
         VRMUtils.combineSkeletons(vrm.scene);
       }
       this.vrm = vrm;
+      detachedScene = null; // The runtime now owns this model, including failure cleanup.
       this.prepareModel(vrm);
       this.applyMotionProfile(vrm, this.bootstrap.character.motionProfile);
       prepareGenericPmxSpringSpace(vrm, this.bootstrap.character.motionProfile);
+      if (this.bootstrap.pmxPhysicsUrl) {
+        this.callbacks.onProgress(84, '载入 PMX 原始刚体与关节…');
+        try {
+          this.pmxPhysics = await PmxPhysics.load(vrm, this.bootstrap.character.motionProfile, this.bootstrap.pmxPhysicsUrl, current);
+        } catch (error) {
+          this.pmxPhysicsFailure = String(error instanceof Error ? error.message : error);
+          console.warn('Original PMX physics unavailable; retaining VRM physics.', error);
+        }
+        if (!current()) return;
+      }
 
       // Converted PMX garments with identifiable body/cloth meshes receive a
       // local triangle-contact pass. Built-in Yachiyo and direct VRM assets
       // never enter this path; unsupported meshes keep their original skin.
-      this.garmentContact = GarmentContactSolver.create(vrm, this.bootstrap.character.motionProfile);
+      this.garmentContact = this.pmxPhysics ? null : GarmentContactSolver.create(vrm, this.bootstrap.character.motionProfile);
       if (this.garmentContact) {
         for (const { source, display } of this.garmentContact.replacements) {
           const index = this.interactiveMeshes.indexOf(source);
@@ -168,26 +236,52 @@ export class AvatarRuntime {
       }
 
       this.animator = new ProceduralAnimator(vrm, this.settings, this.bootstrap.character.motionProfile);
+      this.animator.setOriginalPmxPhysics(!!this.pmxPhysics);
       vrm.springBoneManager?.setInitState();
       this.callbacks.onProgress(94, '启动表情、视线与摇摆骨骼…');
+
+      // Compile while the loading UI still owns the window, before advancing
+      // simulation time. The first interactive frame must not include shader
+      // compilation or instantiate physics from a different bind pose.
+      this.pmxPhysics?.beforePose();
+      this.animator.update(0);
+      this.updateVrm(0);
+      this.callbacks.onProgress(96, '准备角色材质…');
+      await this.renderer.compileAsync(this.scene, this.camera);
+      if (!current()) return;
 
       // Measure the posed avatar before anchoring its first window at the edge.
       // Never feed animated bounds back into camera fitting or window size.
       if (this.usesRenderedFootprint()) {
-        this.animator.update(0);
-        this.updateVrm(0);
         await this.measureRenderedFootprint();
       }
 
+      if (!current()) return;
+
       this.started = true;
-      this.renderer.setAnimationLoop((timestamp) => this.renderFrame(timestamp));
+      if (!this.suspended) this.renderer.setAnimationLoop((timestamp) => this.renderFrame(timestamp));
       this.callbacks.onProgress(100, '角色已准备好');
       const diagnostics = this.collectDiagnostics();
       this.callbacks.onReady(diagnostics);
     } catch (unknownError) {
+      if (detachedScene) disposeModelScene(detachedScene);
+      if (!current()) return;
+      this.started = false;
+      this.renderer.setAnimationLoop(null);
+      this.releaseModel();
       const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));
       this.callbacks.onFatal(error);
     }
+  }
+
+  setSuspended(suspended: boolean): void {
+    if (this.disposed || this.suspended === suspended) return;
+    this.suspended = suspended;
+    // Freeze the simulation clock together with rendering. Resuming must not
+    // feed a hidden window's elapsed wall time into springs or pose blending.
+    this.previousTimestamp = 0;
+    this.lastRenderedTimestamp = 0;
+    this.renderer.setAnimationLoop(!suspended && this.started ? (timestamp) => this.renderFrame(timestamp) : null);
   }
 
   humanoidPoseSnapshot(localSpace = false): Record<string, { x: number; y: number; z: number; rx: number; ry: number; rz: number }> {
@@ -234,6 +328,8 @@ export class AvatarRuntime {
   }
 
   garmentContactSnapshot(): Record<string, unknown> | null {
+    if (this.pmxPhysics) return { ...this.pmxPhysics.diagnostics, enabled: this.settings.physics };
+    if (this.pmxPhysicsFailure) return { ...(this.garmentContact?.diagnostics ?? {}), pmxPhysicsFailure: this.pmxPhysicsFailure };
     return this.garmentContact ? { ...this.garmentContact.diagnostics } : GarmentContactSolver.lastProbe;
   }
 
@@ -273,6 +369,7 @@ export class AvatarRuntime {
     }
     if (physicsChanged) {
       this.vrm?.springBoneManager?.reset();
+      this.pmxPhysics?.reset();
       this.garmentContact?.setEnabled(settings.physics);
     }
     this.updateCamera();
@@ -315,6 +412,7 @@ export class AvatarRuntime {
     this.animator?.reset();
     this.vrm?.springBoneManager?.reset();
     this.garmentContact?.reset();
+    this.pmxPhysics?.reset();
   }
 
   setRotation(rotationY: number): void {
@@ -335,6 +433,8 @@ export class AvatarRuntime {
     const percentileIndex = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
     const p95FrameMs = sorted[percentileIndex] ?? 0;
     return {
+      renderedFrames: this.renderedFrameCount,
+      suspended: this.suspended,
       averageFps: averageFrameMs > 0 ? Number((1000 / averageFrameMs).toFixed(2)) : 0,
       averageFrameMs: Number(averageFrameMs.toFixed(3)),
       p95FrameMs: Number(p95FrameMs.toFixed(3)),
@@ -352,6 +452,15 @@ export class AvatarRuntime {
 
   hitTest(clientX: number, clientY: number): THREE.Intersection | null {
     if (!this.started || !this.vrm) return null;
+    if (this.interactionBoundsFrame !== this.renderedFrameCount) {
+      for (const object of this.interactiveMeshes) {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.visible) continue;
+        if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) updateSkinnedInteractionBounds(mesh as THREE.SkinnedMesh);
+        else { mesh.geometry.boundingBox = null; mesh.geometry.computeBoundingSphere(); }
+      }
+      this.interactionBoundsFrame = this.renderedFrameCount;
+    }
     const pointer = normalizedPointer(clientX, clientY, this.canvas.clientWidth, this.canvas.clientHeight);
     this.raycaster.setFromCamera(pointer, this.camera);
     const intersections = this.raycaster.intersectObjects(this.interactiveMeshes, false);
@@ -359,6 +468,11 @@ export class AvatarRuntime {
   }
 
   hitZone(intersection: THREE.Intersection): HitZone {
+    if (this.vrm) {
+      const source = this.garmentContact?.replacements.find(item => item.display === intersection.object)?.source;
+      const zone = rigHitZone(this.vrm, intersection, source);
+      if (zone) return zone;
+    }
     const normalizedHeight = intersection.point.y / Math.max(0.001, this.modelHeight);
     if (normalizedHeight >= 0.68) return 'head';
     if (normalizedHeight >= 0.34) return 'body';
@@ -430,13 +544,34 @@ export class AvatarRuntime {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.loadSequence++;
     this.renderer.setAnimationLoop(null);
-    this.garmentContact?.dispose();
+    this.started = false;
+    this.releaseModel();
     this.footprintTarget?.dispose();
-    if (this.vrm) VRMUtils.deepDispose(this.vrm.scene);
     this.shadow.geometry.dispose();
+    (this.shadow.material as THREE.MeshBasicMaterial).map?.dispose();
     (this.shadow.material as THREE.Material).dispose();
     this.renderer.dispose();
+  }
+
+  private releaseModel(): void {
+    this.pmxPhysics?.dispose();
+    this.pmxPhysics = null;
+    this.garmentContact?.dispose();
+    this.garmentContact = null;
+    const vrm = this.vrm;
+    this.vrm = null;
+    this.animator = null;
+    this.interactiveMeshes.length = 0;
+    this.interactionBoundsFrame = -1;
+    this.tunedSpringJointCount = 0;
+    this.renderedFootprint = null;
+    this.footprintFailed = false;
+    if (vrm) {
+      vrm.scene.removeFromParent();
+      disposeModelScene(vrm.scene);
+    }
   }
 
   private configureLighting(): void {
@@ -517,6 +652,9 @@ export class AvatarRuntime {
     const shadowWidth = Math.max(size.x * 0.55, size.y * 0.19);
     this.shadow.scale.set(shadowWidth, size.y * 0.17, 1);
     this.fitCamera();
+    for (const object of this.interactiveMeshes) if ((object as THREE.SkinnedMesh).isSkinnedMesh) {
+      updateSkinnedInteractionBounds(object as THREE.SkinnedMesh);
+    }
   }
 
   private fitCamera(): void {
@@ -594,7 +732,7 @@ export class AvatarRuntime {
   }
 
   private renderFrame(timestamp: number): void {
-    if (!this.vrm || !this.animator || this.disposed) return;
+    if (!this.vrm || !this.animator || this.disposed || this.suspended) return;
     const targetFps = this.targetFps();
     const minimumFrameDuration = 1000 / targetFps;
     // A transparent desktop window gains no visible animation quality from
@@ -615,6 +753,7 @@ export class AvatarRuntime {
       if (this.frameDurations.length > 600) this.frameDurations.splice(0, this.frameDurations.length - 600);
     }
     this.renderedFrameCount += 1;
+    this.pmxPhysics?.beforePose();
     if (!this.diagnosticBindPose) this.animator.update(delta);
     this.currentRotationY = damp(this.currentRotationY, this.targetRotationY + this.autonomyFacing, 8.5, delta);
     this.avatarPivot.rotation.y = this.currentRotationY;
@@ -624,6 +763,7 @@ export class AvatarRuntime {
       void this.measureRenderedFootprint();
     }
     this.renderer.render(this.scene, this.camera);
+    this.callbacks.onFrame?.();
     this.assessAdaptivePerformance(timestamp);
   }
 
@@ -684,7 +824,20 @@ export class AvatarRuntime {
     this.vrm.lookAt?.update(delta);
     this.vrm.expressionManager?.update();
     this.vrm.nodeConstraintManager?.update();
-    if (this.settings.physics && this.vrm.springBoneManager) {
+    if (this.settings.physics && this.pmxPhysics) {
+      try {
+        this.pmxPhysics.update(delta);
+      } catch (error) {
+        this.pmxPhysicsFailure = error instanceof Error ? error.message : String(error);
+        this.pmxPhysics.beforePose();
+        this.pmxPhysics.dispose(); this.pmxPhysics = null;
+        this.animator?.setOriginalPmxPhysics(false);
+        this.vrm.humanoid.update(); this.vrm.springBoneManager?.reset();
+        this.garmentContact = GarmentContactSolver.create(this.vrm, this.bootstrap.character.motionProfile);
+        if (this.garmentContact) for (const { display } of this.garmentContact.replacements) this.interactiveMeshes.push(display);
+        console.warn('PMX physics stopped; restored VRM physics.', error);
+      }
+    } else if (this.settings.physics && this.vrm.springBoneManager) {
       // The fixed-rate generic standard is shared by every VRM. It removes the
       // visible change in cloth behaviour between 30/60 Hz and splits delayed
       // frames without allowing an unbounded amount of catch-up work.
@@ -806,7 +959,7 @@ export class AvatarRuntime {
       anatomy: this.animator?.getAnatomyDiagnostics() ?? null,
       tunedSpringJointCount: this.tunedSpringJointCount,
       garmentPose: this.animator?.getGarmentPoseDiagnostics() ?? null,
-      garmentContact: this.garmentContact?.diagnostics ?? GarmentContactSolver.lastProbe,
+      garmentContact: this.garmentContactSnapshot(),
       avatarViewportBounds: this.avatarViewportBounds(),
     };
   }

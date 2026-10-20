@@ -1,6 +1,6 @@
 {
   "name": "yachiyo-desk",
-  "version": "1.0.7",
+  "version": "1.0.9",
   "private": true,
   "description": "A high-quality local desktop companion with VRM/PMX character import",
   "author": "Excalibur",
@@ -12,8 +12,10 @@
     "electron:dev": "electron . --dev",
     "build:renderer": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "verify": "npm run typecheck && npm run test && npm run build:renderer",
+    "test": "vitest run tests",
+    "sync:local": "node scripts/sync-local.cjs --apply",
+    "sync:check": "node scripts/sync-local.cjs --check",
+    "verify": "npm run typecheck && npm run test && npm run build:renderer && node scripts/sync-local.cjs --check --if-present",
     "smoke": "npm run build:renderer && electron . --onboarding-test",
     "smoke:model": "npm run build:renderer && electron . --smoke-test",
     "start": "npm run build:renderer && electron .",
@@ -21,6 +23,8 @@
     "dist:portable": "npm run verify && node scripts/package.cjs --win portable"
   },
   "dependencies": {
+    "@moeru/three-mmd": "0.2.0-beta.2",
+    "@moeru/three-mmd-physics-ammo": "0.2.0-beta.2",
     "@pixiv/three-vrm": "3.5.5",
     "three": "0.185.1",
     "three-mesh-bvh": "0.9.15"
@@ -46,7 +50,9 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "package.json"
+      "package.json",
+      "THIRD_PARTY_NOTICES.md",
+      "!node_modules/**/*"
     ],
     "extraResources": [
       {
@@ -57,7 +63,11 @@
         "from": "characters",
         "to": "characters",
         "filter": [
-          "**/*"
+          "yachiyo/**/*",
+          "!**/*.vrm",
+          "!**/*.pmx",
+          "!**/*.pmd",
+          "!**/*.blend"
         ]
       },
       {

@@ -16,6 +16,8 @@
 
 YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + `@pixiv/three-vrm` 渲染 VRM 角色，提供透明桌面窗口、拖动、点击互动、平滑待机/行走、动作与对白、状态面板、角色切换，以及在本机把 PMX 转换成 VRM 后导入。
 
+当前版本 **1.0.9，1.x 收官版**。本轮完善通用 PMX 衣物物理、动作衔接、交互与资源管理，公开版和桌面版共用核心实现。详见 [版本记录](docs/RELEASE_20261020.md)、[AIRI 适配依据](docs/AIRI_REVIEW_20261020.md) 与 [使用说明](docs/LOCAL_USAGE.md)。新增产品功能留待 2.0，方案见 [后续建议](docs/IMPROVEMENT_PROPOSALS.md)。
+
 > 你可以把它当作一个可扩展的本地角色运行时：模型属于你自己，程序负责加载、动作、交互、窗口和配置。
 
 ## ✨ 功能一览
@@ -52,6 +54,8 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 | [架构与扩展点](docs/ARCHITECTURE.md) | 了解主进程、renderer、动作系统、manifest 和通用角色标准 |
 | [需求与验收清单](docs/REQUIREMENTS.md) | 历次产品要求、当前实现位置与明确兼容边界 |
 | [变更记录](CHANGELOG.md) | 查看版本功能、版权策略和后续方向 |
+| [当前维护与交付](docs/MAINTENANCE.md) | 两版同步、构建、测试、目录整理及当前交付证据 |
+| [本机桌面使用说明](docs/LOCAL_USAGE.md) | 当前本地程序入口与操作 |
 | [安全与隐私](SECURITY.md) | 报告路径穿越、远程执行、资产泄露等安全问题 |
 
 如果你只想使用程序，阅读“下载并运行”和[安装与角色导入指南](docs/INSTALLATION.md)即可；如果你想改动作、增加角色或调整 PMX 映射，再阅读[架构与扩展点](docs/ARCHITECTURE.md)。
@@ -62,8 +66,8 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 打开 [Releases](https://github.com/earth34online/YachiyoDesk/releases/latest)，在 **Assets** 区域选择一个版本：
 
-- [便携版 Portable](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.7-x64-Portable.exe)：下载后直接运行，不写入安装目录。
-- [安装版 Setup](https://github.com/earth34online/YachiyoDesk/releases/latest/download/YachiyoDesk-1.0.7-x64-Setup.exe)：按向导安装，可创建桌面和开始菜单快捷方式。
+- `YachiyoDesk-<版本>-x64-Portable.exe`：下载后直接运行，不写入安装目录。
+- `YachiyoDesk-<版本>-x64-Setup.exe`：按向导安装，可创建桌面和开始菜单快捷方式。
 - [`SHA256SUMS.txt`](https://github.com/earth34online/YachiyoDesk/releases/latest/download/SHA256SUMS.txt)：校验下载文件完整性。
 
 下载后的操作顺序：
@@ -79,24 +83,26 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 ```powershell
 $dir = Join-Path $env:USERPROFILE 'Downloads\YachiyoDesk'
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
-$base = 'https://github.com/earth34online/YachiyoDesk/releases/latest/download'
-Invoke-WebRequest "$base/YachiyoDesk-1.0.7-x64-Portable.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.7-x64-Portable.exe')
-Invoke-WebRequest "$base/YachiyoDesk-1.0.7-x64-Setup.exe" -OutFile (Join-Path $dir 'YachiyoDesk-1.0.7-x64-Setup.exe')
-Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $dir 'SHA256SUMS.txt')
+$release = Invoke-RestMethod 'https://api.github.com/repos/earth34online/YachiyoDesk/releases/latest'
+$assets = @($release.assets | Where-Object { $_.name -match '-x64-(Portable|Setup)\.exe$|^SHA256SUMS\.txt$' })
+foreach ($asset in $assets) {
+    Invoke-WebRequest $asset.browser_download_url -OutFile (Join-Path $dir $asset.name)
+}
 Set-Location $dir
-Get-FileHash .\YachiyoDesk-1.0.7-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.7-x64-Setup.exe -Algorithm SHA256
+Get-ChildItem -File 'YachiyoDesk-*-x64-*.exe' | Get-FileHash -Algorithm SHA256
 ```
 
 确认哈希与 `SHA256SUMS.txt` 一致后运行其一：
 
 ```powershell
-Start-Process .\YachiyoDesk-1.0.7-x64-Portable.exe
+$portable = Get-ChildItem -File 'YachiyoDesk-*-x64-Portable.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Start-Process -FilePath $portable.FullName
 # 或者
-Start-Process .\YachiyoDesk-1.0.7-x64-Setup.exe
+$setup = Get-ChildItem -File 'YachiyoDesk-*-x64-Setup.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Start-Process -FilePath $setup.FullName
 ```
 
-`/releases/latest` 页面地址固定指向最新正式版本；Release asset 的文件名包含版本号，因此脚本中的 `1.0.7` 需要在下一次正式发布时同步更新。
+`/releases/latest` 指向 GitHub 上已经发布的最新正式版本。上述脚本从该 Release 获取实际文件名；本机已生成的构建记录与 GitHub 发布状态分别维护。
 
 首次公开版启动时不会内置八千代模型。请点击“打开角色库并导入”，导入你有权使用的 `.vrm`，或导入 `.pmx` 让本机转换器生成 VRM；之后在角色库中点击“使用”。模型会保存在 `%APPDATA%\YachiyoDesk\characters`，下次启动会自动使用已选择的角色。新导入角色首次启用时按 35% 显示；之后每个角色分别记住手动调整的比例，不会覆盖八千代已有的比例。透明置顶窗口和开机启动设置可在面板中调整。
 
@@ -167,7 +173,9 @@ npm run start
 | `npm run typecheck` | 只执行 TypeScript 类型检查 |
 | `npm test` | 执行 Vitest 单元测试 |
 | `npm run build:renderer` | 构建 Vite renderer 到 `dist/` |
-| `npm run verify` | 依次执行类型检查、测试和 renderer 构建 |
+| `npm run verify` | 执行类型检查、维护中的测试、renderer 构建及两版同步检查 |
+| `npm run sync:local` | 将共享源码、测试、构建配置及叙述性文档同步到桌面项目 |
+| `npm run sync:check` | 检查两份项目共享内容是否一致 |
 | `npm run start` | 先构建 renderer，再启动 Electron 应用 |
 
 开发调试需要两个终端：

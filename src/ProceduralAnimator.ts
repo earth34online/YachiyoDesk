@@ -130,6 +130,9 @@ export class ProceduralAnimator {
   private readonly genericConstraints: GenericPoseConstraints | null;
   private readonly skirtRestAngles: { left: number; right: number; leftRadius: number; rightRadius: number; frontDepth: number; backDepth: number; gaitScale: number; lateralGaitScale: number; height: number } | null;
   private elapsed = 0;
+  private sleepWeight = 0;
+  private slowPhase = 0;
+  private breathPhase = 0;
   private nextBlinkAt = randomBetween(2.2, 4.8);
   private blinkStartedAt = -1;
   private blinkDuration = 0.18;
@@ -150,6 +153,7 @@ export class ProceduralAnimator {
   private walkWeight = 0;
   private dragging = false;
   private draggingWeight = 0;
+  private originalPmxPhysics = false;
 
   constructor(vrm: VRM, settings: AppSettings, motionProfile: MotionProfile) {
     this.vrm = vrm;
@@ -166,8 +170,14 @@ export class ProceduralAnimator {
     this.settings = settings;
   }
 
-  getGarmentPoseDiagnostics(): typeof this.skirtRestAngles {
-    return this.skirtRestAngles;
+  setOriginalPmxPhysics(active: boolean): void {
+    this.originalPmxPhysics = active && this.motionProfile.profileId === 'generic-vrm'
+      && this.motionProfile.capabilities.includes('pmx-converted');
+  }
+
+  getGarmentPoseDiagnostics() {
+    return this.skirtRestAngles ? { ...this.skirtRestAngles, originalPmxPhysics: this.originalPmxPhysics,
+      effectiveGaitScale: this.originalPmxPhysics ? 1 : this.skirtRestAngles.gaitScale } : null;
   }
 
   getAnatomyDiagnostics(): Record<string, unknown> | null {
@@ -205,13 +215,23 @@ export class ProceduralAnimator {
   }
 
   setAutonomousMotion(motion: AutonomousMotion, direction: -1 | 1 = 1): void {
+    if (motion === 'walk' && (this.reaction || direction !== this.autonomousDirection)) this.beginPoseTransition();
+    // Keep phase while walking or fading out. Repeated commands and stopping
+    // must not instantaneously return both legs to the phase-zero pose.
+    if (motion === 'walk' && this.autonomousMotion !== 'walk' && this.walkWeight < .001) {
+      this.autonomousStartedAt = this.elapsed;
+    }
     this.autonomousMotion = motion;
-    this.autonomousDirection = direction;
-    this.autonomousStartedAt = this.elapsed;
-    if (motion === 'walk') this.reaction = null;
+    if (motion === 'walk') this.autonomousDirection = direction;
+    if (motion === 'walk') {
+      this.reaction = null;
+      this.noteActivity();
+    }
   }
 
   setDragging(active: boolean): void {
+    if (active === this.dragging) return;
+    this.beginPoseTransition();
     this.dragging = active;
     if (active) {
       this.reaction = null;
@@ -225,11 +245,15 @@ export class ProceduralAnimator {
     // Preserve the exact current pose and cross-fade from it. High-frequency
     // interaction can otherwise replace an in-progress state with a new pose
     // whose envelope starts at zero, causing a one-frame snap to neutral.
-    this.transitionPose = clonePose(this.pose);
-    this.transitionStartedAt = this.elapsed;
+    this.beginPoseTransition();
     this.reaction = { name, startedAt: this.elapsed, duration: REACTION_DURATION[name] };
     this.autonomousMotion = 'idle';
     this.noteActivity();
+  }
+
+  private beginPoseTransition(): void {
+    this.transitionPose = clonePose(this.pose);
+    this.transitionStartedAt = this.elapsed;
   }
 
   reset(): void {
@@ -239,17 +263,31 @@ export class ProceduralAnimator {
     this.walkWeight = 0;
     this.dragging = false;
     this.draggingWeight = 0;
+    this.sleepWeight = 0;
+    this.noteActivity();
+    this.blinkStartedAt = -1;
+    this.nextBlinkAt = this.elapsed + randomBetween(2.2, 4.8);
     this.lookCurrent.set(0, 0);
     this.wanderTarget.set(0, 0);
     this.vrm.humanoid.resetNormalizedPose();
     this.vrm.lookAt?.reset();
-    this.vrm.springBoneManager?.reset();
     this.expressions.reset();
+    // Publish the relaxed pose now, so a command received before the next
+    // render cannot capture stale reaction values or show the bind T-pose.
+    this.update(0);
+    this.vrm.humanoid.update();
+    this.vrm.springBoneManager?.reset();
   }
 
   update(delta: number): void {
     this.elapsed += delta;
-    const sleeping = this.elapsed - this.lastActivityAt >= this.settings.sleepMinutes * 60;
+    const sleeping = this.elapsed - this.lastActivityAt >= this.settings.sleepMinutes * 60
+      && this.autonomousMotion !== 'walk' && !this.dragging && !this.reaction;
+    this.sleepWeight = damp(this.sleepWeight, sleeping ? 1 : 0, 3.2, delta);
+    // Integrate frequency: changing tempo must not reinterpret all elapsed
+    // time and jump to a different point in the breathing cycle.
+    this.slowPhase += delta * THREE.MathUtils.lerp(.82, .68, this.sleepWeight);
+    this.breathPhase += delta * THREE.MathUtils.lerp(1.72, 1.18, this.sleepWeight);
     const targetMotion = this.settings.idleMotion ? 1 : 0;
     this.motionWeight = damp(this.motionWeight, targetMotion, 5.2, delta);
     this.walkWeight = damp(this.walkWeight, this.autonomousMotion === 'walk' ? 1 : 0, 7.5, delta);
@@ -276,7 +314,7 @@ export class ProceduralAnimator {
     }
 
     const reactionName = activeReaction?.name ?? null;
-    this.updatePose(sleeping, reactionName, reactionWeight, reactionElapsed, activeReaction?.duration ?? 1);
+    this.updatePose(this.sleepWeight, reactionName, reactionWeight, reactionElapsed, activeReaction?.duration ?? 1);
     this.applyPoseTransition();
     const progress = reactionElapsed / (activeReaction?.duration ?? 1);
     const constraintWeight = reactionName === 'crouch' ? windowPulse(progress, .02, .24, .72, .98)
@@ -292,12 +330,9 @@ export class ProceduralAnimator {
       this.vrm.lookAt.pitch = this.lookCurrent.y * 6 * this.settings.lookIntensity;
     }
 
-    const naturalBlink = sleeping ? 0 : this.updateBlink();
-    const blink = sleeping
-      ? 1
-      : reactionName === 'sleepy'
-        ? Math.max(naturalBlink, reactionWeight * 0.88)
-        : naturalBlink;
+    const naturalBlink = this.updateBlink();
+    const reactionBlink = reactionName === 'sleepy' ? Math.max(naturalBlink, reactionWeight * .88) : naturalBlink;
+    const blink = THREE.MathUtils.lerp(reactionBlink, 1, this.sleepWeight);
     const mouth = reactionName === 'greet' || reactionName === 'dance' || reactionName === 'cheer'
       ? 0.08 + Math.max(0, Math.sin(reactionElapsed * 5.6) * 0.11 + Math.sin(reactionElapsed * 8.9) * 0.06)
       : reactionName === 'sleepy'
@@ -305,11 +340,11 @@ export class ProceduralAnimator {
         : 0;
     const displayedReaction = this.draggingWeight > 0.18
       ? 'surprised'
-      : sleeping ? 'sleepy' : reactionName;
+      : reactionName ?? (this.sleepWeight > .001 ? 'sleepy' : null);
     const displayedWeight = this.draggingWeight > 0.18
       ? Math.min(0.38, this.draggingWeight * 0.38)
-      : sleeping ? 0.24 : reactionWeight;
-    this.expressions.update(blink, displayedReaction, displayedWeight, mouth);
+      : reactionName ? reactionWeight : this.sleepWeight * .24;
+    this.expressions.update(blink, displayedReaction, displayedWeight, mouth, delta);
   }
 
   private updateBlink(): number {
@@ -355,15 +390,15 @@ export class ProceduralAnimator {
   }
 
   private updatePose(
-    sleeping: boolean,
+    sleepWeight: number,
     reaction: ReactionName | null,
     weight: number,
     reactionElapsed: number,
     reactionDuration: number,
   ): void {
     const idle = this.motionWeight * this.settings.motionIntensity;
-    const slowPhase = this.elapsed * (sleeping ? 0.68 : 0.82);
-    const breathPhase = this.elapsed * (sleeping ? 1.18 : 1.72);
+    const slowPhase = this.slowPhase;
+    const breathPhase = this.breathPhase;
     const breath = Math.sin(breathPhase) * 0.0072 * idle;
     const weightShift = Math.sin(slowPhase) * 0.0105 * idle;
     const counterShift = Math.sin(slowPhase * 0.63 + 1.1) * 0.0055 * idle;
@@ -479,7 +514,7 @@ export class ProceduralAnimator {
       // strictly opposite in phase so one leg advances while the other trails;
       // this is the part that must remain visible even when a skirt covers the
       // knees. The amplitudes are intentionally shared by all imported rigs.
-      const skirtGait = this.skirtRestAngles?.gaitScale ?? 1;
+      const skirtGait = this.originalPmxPhysics ? 1 : this.skirtRestAngles?.gaitScale ?? 1;
       leftUpperLegX += (leftGait?.thigh ?? stride) * 0.56 * walk * walkTuning.strideScale * skirtGait;
       rightUpperLegX += (rightGait?.thigh ?? -stride) * 0.56 * walk * walkTuning.strideScale * skirtGait;
       // Keep the walking chain in the sagittal plane. PMX rigs mirror local
@@ -547,15 +582,15 @@ export class ProceduralAnimator {
       rightFootX -= 0.21 * held;
     }
 
-    if (sleeping) {
-      headX += 0.145;
-      headZ += 0.055;
-      torsoX += 0.035;
-      torsoZ += 0.018;
-      leftShoulderZ += 0.045;
-      rightShoulderZ -= 0.045;
-      leftArmZ -= 0.055;
-      rightArmZ += 0.055;
+    if (sleepWeight > 0) {
+      headX += 0.145 * sleepWeight;
+      headZ += 0.055 * sleepWeight;
+      torsoX += 0.035 * sleepWeight;
+      torsoZ += 0.018 * sleepWeight;
+      leftShoulderZ += 0.045 * sleepWeight;
+      rightShoulderZ -= 0.045 * sleepWeight;
+      leftArmZ -= 0.055 * sleepWeight;
+      rightArmZ += 0.055 * sleepWeight;
     }
 
     if (reaction === 'greet') {

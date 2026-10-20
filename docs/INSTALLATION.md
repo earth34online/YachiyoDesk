@@ -1,5 +1,7 @@
 # 安装与角色导入指南
 
+当前版本为 **1.0.9，1.x 收官版**。本机入口见 [使用说明](LOCAL_USAGE.md)，构建与同步见 [维护指南](MAINTENANCE.md)，验证见 [版本记录](RELEASE_20261020.md)。下方下载入口指向 GitHub 实际发布的 Release。
+
 这份文档面向第一次使用 YachiyoDesk 的用户。若你只想快速运行，直接下载 [最新 Release](https://github.com/earth34online/YachiyoDesk/releases/latest) 即可；若你需要处理 PMX、排查材质或迁移数据，请继续阅读。
 
 ## 1. 选择构建版本
@@ -14,13 +16,13 @@
 下载后建议先校验 SHA-256：
 
 ```powershell
-Get-FileHash .\YachiyoDesk-1.0.7-x64-Portable.exe -Algorithm SHA256
-Get-FileHash .\YachiyoDesk-1.0.7-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.8-x64-Portable.exe -Algorithm SHA256
+Get-FileHash .\YachiyoDesk-1.0.8-x64-Setup.exe -Algorithm SHA256
 ```
 
 将输出与 Release 中的 `SHA256SUMS.txt` 对比。GitHub 的 `/releases/latest/download/...` 链接会始终指向最新正式 Release，适合脚本或收藏使用。
 
-不同版本的哈希不同，请下载同一个 Release 附带的 `SHA256SUMS.txt` 对照，不要用旧版哈希校验新版文件。
+示例使用本机成品 1.0.8 的文件名；从 GitHub 下载其他已发布版本时，使用该 Release 中的实际文件名和同一版本的 `SHA256SUMS.txt`。
 
 如果 PowerShell 命令输出不同，不要运行该文件；重新从 Release 下载，或检查下载是否被代理、杀毒软件或浏览器中断。
 

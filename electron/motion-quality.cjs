@@ -36,6 +36,11 @@ function validateFingerFlexion(samples) {
 }
 
 function garmentSurfaceIssues(label, state) {
+  // Original PMX rigid-body physics is a distinct backend. Its activation
+  // proves neither triangle clearance nor visual quality. Keep that missing
+  // acceptance evidence explicit rather than treating a new engine as passed.
+  if (state?.engine === 'pmx-ammo') return [{ label, reason: state.enabled
+    ? 'native-pmx-surface-review-required' : 'native-pmx-physics-disabled', state }];
   if (!state || !('garmentMeshes' in state)) return [{ label, reason: 'garment-contact-unavailable', state }];
   const issues = [];
   if (!state.enabled || state.coolingMeshes > 0) issues.push({ label, reason: 'garment-contact-incomplete-coverage', state });

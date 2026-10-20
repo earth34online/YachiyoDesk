@@ -848,6 +848,9 @@ export class GarmentContactSolver {
     // The cached face bounds the exact query; it is never blindly reused as a
     // contact normal after a limb moves or the nearest surface changes.
     const hit = this.bodyBvh.closestPointToPoint(point, this.closest, 0, radius);
+    // BVH thresholds prune nodes, but a leaf may still return a farther face.
+    // Do not turn that face into a contact outside the requested neighbourhood.
+    if (hit && hit.distance > radius) return null;
     if (hit && hints) hints[slot] = hit.faceIndex;
     return hit;
   }

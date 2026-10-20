@@ -15,7 +15,7 @@ function harness() {
   };
   const api = { setClickThrough: vi.fn(), updateSettings: vi.fn().mockResolvedValue(DEFAULT_SETTINGS),
     flushInteractionSettings: vi.fn().mockReturnValue(true), noteUserActivity: vi.fn(),
-    setInteractionPanelOpen: vi.fn() };
+    setInteractionPanelOpen: vi.fn(), beginWindowDrag: vi.fn(), endWindowDrag: vi.fn(), updateWindowDrag: vi.fn() };
   vi.stubGlobal('window', { addEventListener: (name: string, handler: (event: any) => void) => handlers.set(name, handler),
     setTimeout, clearTimeout, yachiyoDesk: api });
   vi.stubGlobal('document', { body: { classList } });
@@ -32,18 +32,41 @@ function harness() {
     isCompanionDockTarget: () => false,
   }) as AppUI;
   const runtime = { hitTest: vi.fn().mockReturnValue(null), setPointer: vi.fn(), resetPose: vi.fn(),
-    setZoom: vi.fn(), setRotation: vi.fn(), noteActivity: vi.fn() };
-  const controller = new InteractionController({} as HTMLCanvasElement, runtime as unknown as AvatarRuntime, ui, { ...DEFAULT_SETTINGS });
+    setZoom: vi.fn(), setRotation: vi.fn(), noteActivity: vi.fn(), hitZone: vi.fn().mockReturnValue('head'), setDragging: vi.fn() };
+  const canvas = {setPointerCapture:vi.fn(),releasePointerCapture:vi.fn()};
+  const controller = new InteractionController(canvas as unknown as HTMLCanvasElement, runtime as unknown as AvatarRuntime, ui, { ...DEFAULT_SETTINGS });
   Object.assign(ui, { callbacks: { onCloseSettings: () => controller.reevaluateClickThrough(),
     onInteractionStateChanged: () => controller.reevaluateClickThrough() } });
   const event = (extra = {}) => ({ clientX: 2, clientY: 2, screenX: 2, screenY: 2, preventDefault: vi.fn(), ...extra });
-  return { api, ui, runtime, controller, handlers, event };
+  return { api, ui, runtime, controller, handlers, event, canvas };
 }
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('desktop input ownership', () => {
+  it('releases gaze and hover after leaving the window without cancelling a captured drag', () => {
+    const h=harness();h.ui.finishLoading();h.runtime.hitTest.mockReturnValue({});
+    h.handlers.get('pointermove')!(h.event());
+    expect(document.body.classList.contains('over-avatar')).toBe(true);
+    h.handlers.get('pointerout')!(h.event({relatedTarget:null}));
+    expect(document.body.classList.contains('over-avatar')).toBe(false);
+    expect(h.runtime.setPointer).toHaveBeenLastCalledWith(0,0,false);
+    vi.advanceTimersByTime(360);expect(h.api.setClickThrough).toHaveBeenLastCalledWith(true);
+    h.handlers.get('pointerdown')!(h.event({button:0,pointerId:1}));
+    h.runtime.setPointer.mockClear();h.handlers.get('pointerout')!(h.event({relatedTarget:null}));
+    expect(h.runtime.setPointer).not.toHaveBeenCalled();expect(h.api.endWindowDrag).not.toHaveBeenCalled();
+    h.handlers.get('blur')!(h.event());expect(h.api.endWindowDrag).toHaveBeenCalledOnce();
+  });
+  it('ends lost pointer capture once even if release dispatches another capture event', () => {
+    const h=harness();h.ui.finishLoading();h.runtime.hitTest.mockReturnValue({});
+    h.handlers.get('pointerdown')!(h.event({button:0,pointerId:1}));
+    h.canvas.releasePointerCapture.mockImplementation(()=>h.handlers.get('lostpointercapture')!(h.event({pointerId:1})));
+    h.handlers.get('lostpointercapture')!(h.event({pointerId:2}));expect(h.api.endWindowDrag).not.toHaveBeenCalled();
+    h.handlers.get('lostpointercapture')!(h.event({pointerId:1}));
+    expect(h.api.endWindowDrag).toHaveBeenCalledOnce();expect(h.runtime.setDragging).toHaveBeenLastCalledWith(false);
+    expect(h.canvas.releasePointerCapture).toHaveBeenCalledOnce();
+  });
   it('keeps first-run setup and fatal retry clickable after pointer movement and panel closure', () => {
     const h = harness();
     h.controller.reevaluateClickThrough();

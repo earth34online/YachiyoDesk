@@ -29,6 +29,24 @@ function fixture(interior: boolean) {
 }
 afterEach(() => vi.restoreAllMocks());
 describe('bounded garment surface coverage and recovery', () => {
+  it('rejects a remote face returned from a single BVH leaf beyond the query radius', () => {
+    const original = fixture(false), scene = original.replacements[0].source.parent!;
+    original.dispose();
+    const body = scene.children.find(o => (o as THREE.Mesh).isMesh
+      && ((o as THREE.Mesh).material as THREE.Material).name === 'BODY') as THREE.SkinnedMesh;
+    body.geometry.setIndex([0, 1, 2]);
+    const solver = GarmentContactSolver.create({ scene } as VRM, sanitizeMotionProfile({ capabilities: ['pmx-converted'] }))!;
+    solver.update(1 / 60);
+    expect(solver.diagnostics.lastContacts).toBe(0);
+    const source = solver.replacements[0].source.geometry.attributes.position;
+    const output = solver.replacements[0].display.geometry.attributes.position;
+    for (let i = 0; i < source.count; i++) {
+      expect(output.getX(i)).toBeCloseTo(source.getX(i), 5);
+      expect(output.getY(i)).toBeCloseTo(source.getY(i), 5);
+      expect(output.getZ(i)).toBeCloseTo(source.getZ(i), 5);
+    }
+    solver.dispose();
+  });
   it('skins this frame after bone movement and desktop rotation instead of stale bone and bind matrices', () => {
     const solver = fixture(true);
     const source = solver.replacements[0].source;

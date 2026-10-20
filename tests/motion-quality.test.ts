@@ -2,6 +2,12 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 const { validateAnatomy, validateFingerFlexion, garmentSurfaceIssues } = createRequire(import.meta.url)('../electron/motion-quality.cjs');
 describe('motion test acceptance', () => {
+  it('does not certify visible cloth clearance from a working native physics engine alone', () => {
+    expect(garmentSurfaceIssues('crouch', { engine: 'pmx-ammo', enabled: true, mappedBones: 407, nativeBones: 407 }))
+      .toMatchObject([{ reason: 'native-pmx-surface-review-required' }]);
+    expect(garmentSurfaceIssues('dance', { engine: 'pmx-ammo', enabled: false }))
+      .toMatchObject([{ reason: 'native-pmx-physics-disabled' }]);
+  });
   const idle = { leftToeRise: -.04, rightToeRise: -.04 };
   const anatomy = { calibrated: true, legLength: .85, leftKneeForward: .23, rightKneeForward: .23,
     leftFootSupportError: .0005, rightFootSupportError: .0005, leftToeSupportError: .0005, rightToeSupportError: .0005,

@@ -2,6 +2,8 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
+import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
@@ -21,6 +23,48 @@ const { describePmxConversionFailure, resolvePmxConverter, validatePmxSource, in
 };
 
 describe('PMX conversion boundary', () => {
+  it.each(['PASS', 'FAIL'])('recovers a fresh native crash even when an older %s report exists', async (previousResult) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yachiyo-report-retry-'));
+    try {
+      const sourcePath = path.join(directory, 'model.pmx'), outputPath = path.join(directory, 'model.vrm');
+      const reportPath = path.join(directory, 'report.json');
+      fs.writeFileSync(sourcePath, Buffer.concat([Buffer.from('PMX '), Buffer.alloc(64)]));
+      fs.writeFileSync(reportPath, JSON.stringify({ result: previousResult, error: 'old result' }));
+      for (const name of ['mmd_tools', 'vrm']) {
+        const addon = path.join(directory, 'extensions', 'blender_org', name);
+        fs.mkdirSync(addon, { recursive: true });
+        for (const file of ['__init__.py', 'blender_manifest.toml']) fs.writeFileSync(path.join(addon, file), '');
+      }
+      const attempts: string[][] = [];
+      const spawn = (_executable: string, args: string[]) => {
+        attempts.push(args);
+        const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill() {} });
+        queueMicrotask(() => {
+          if (attempts.length === 1) child.emit('close', 139, null);
+          else {
+            fs.writeFileSync(args[args.indexOf('--') + 3], JSON.stringify({ result: 'PASS', fresh: true }));
+            fs.writeFileSync(outputPath, 'fresh model');
+            child.emit('close', 0, null);
+          }
+        });
+        return child;
+      };
+      const module = { exports: {} as any };
+      vm.runInNewContext(fs.readFileSync(path.resolve('electron/pmx-converter.cjs'), 'utf8'), {
+        module, exports: module.exports, __dirname: path.resolve('electron'), process, Buffer, setTimeout, clearTimeout,
+        require: (name: string) => name === 'node:child_process' ? { spawn } : require(name),
+      });
+      const result = await module.exports.convertPmxToVrm({ sourcePath, outputPath, reportPath,
+        converter: { blenderPath: 'fake', scriptPath: 'fake', blenderUserResources: directory } });
+      expect(attempts).toHaveLength(2);
+      expect(attempts[0]).not.toContain('--compatibility-mode');
+      expect(attempts[1]).toContain('--compatibility-mode');
+      expect(attempts[0][attempts[0].indexOf('--') + 3]).not.toBe(attempts[1][attempts[1].indexOf('--') + 3]);
+      expect(result.report).toEqual({ result: 'PASS', fresh: true });
+      expect(JSON.parse(fs.readFileSync(reportPath, 'utf8'))).toEqual(result.report);
+      expect(fs.readdirSync(directory).filter(name => name.includes('.attempt-'))).toEqual([]);
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  });
   it('fails before launching Blender when either extension is missing', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yachiyo-addons-'));
     try {

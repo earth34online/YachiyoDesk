@@ -190,6 +190,8 @@ export class AppUI {
     this.speech.style.top = `${y}px`;
   }
 
+  isSpeechVisible(): boolean { return this.speech.classList.contains('is-visible'); }
+
   showToast(message: string, duration = 1900): void {
     this.toast.textContent = message;
     this.toast.classList.add('is-visible');
@@ -301,8 +303,10 @@ export class AppUI {
   }
 
   private garmentContactText(): string {
-    if (!this.settings.physics) return '衣物网格接触已关闭。';
+    if (!this.settings.physics) return '头发与衣物物理已关闭。';
     const state = this.garmentContact;
+    if (state?.engine === 'pmx-ammo') return '正在使用模型原有的衣物与头发物理。';
+    if (state?.pmxPhysicsFailure) return '当前使用兼容物理。' + String(state.pmxPhysicsFailure);
     if (!state || !('garmentMeshes' in state)) return '当前模型使用原有摇摆骨骼物理。';
     if (Number(state.coolingMeshes) > 0) return `部分衣物接触暂缓，约 ${Math.ceil(Number(state.retryInSeconds))} 秒后重试；其他衣物与摇摆骨骼仍在运行。`;
     if (Number(state.reducedMeshes) > 0) return '衣物接触正在节省性能，已减少表面修正次数；摇摆骨骼仍在运行。';

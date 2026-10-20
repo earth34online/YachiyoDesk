@@ -9,16 +9,20 @@ const {
   Notification,
   Tray,
   nativeImage,
+  net,
   protocol,
   screen,
   shell,
 } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { SettingsStore } = require('./settings.cjs');
 const { inspectVrmFile } = require('./vrm-file.cjs');
 const { loadApplicationIcon } = require('./app-icon.cjs');
+const { protectCompanionWindow } = require('./window-policy.cjs');
 const { readTestCharacterMetadata } = require('./test-character.cjs');
+const { preservePmxPhysics, resolvePmxPhysicsAsset } = require('./pmx-physics-assets.cjs');
 const { validateAnatomy, validateFingerFlexion, garmentSurfaceIssues } = require('./motion-quality.cjs');
 const { switchCharacterScale, rememberCharacterScale } = require('./character-scale.cjs');
 const { calculateDragPosition, clampDragPosition, horizontalWindowRange, planGenericWalk } = require('./window-drag.cjs');
@@ -134,6 +138,7 @@ let nextInterludeAfterWalks = 3;
 let patrolDirection = -1;
 let interactionPanelOpen = false;
 let runtimeIsReady = false;
+let stageSuspended = false;
 let latestClickThrough = false;
 let characterSwitchInProgress = false;
 let interactionFlushToken = 0;
@@ -193,6 +198,9 @@ function prepareSmokeCharacter() {
   const directory = path.join(userCharactersRoot(), id);
   fs.mkdirSync(directory, { recursive: true });
   fs.copyFileSync(fixture, path.join(directory, 'model.vrm'));
+  const physicsFixture = path.join(path.dirname(fixture), 'physics.pmx');
+  if (fs.existsSync(physicsFixture)) fs.copyFileSync(physicsFixture, path.join(directory, 'physics.pmx'));
+  else fs.rmSync(path.join(directory, 'physics.pmx'), { force: true });
   const manifest = {
     id,
     displayName: '本地测试角色',
@@ -290,6 +298,7 @@ function readCharacterManifest(directory, id, builtIn) {
     credit: manifest.credit || `${displayName} · 本地模型`,
     sourceFileName: manifest.sourceFileName,
     sourceFormat: manifest.sourceFormat === 'pmx' ? 'pmx' : 'vrm',
+    sourceSha256: /^[a-f\d]{64}$/i.test(manifest.sourceSha256 ?? '') ? manifest.sourceSha256.toLowerCase() : undefined,
     messages: {
       ...genericMessages(displayName),
       ...(manifest.messages && typeof manifest.messages === 'object' ? manifest.messages : {}),
@@ -438,7 +447,9 @@ async function registerAssetProtocol() {
   await protocol.handle('appasset', async (request) => {
     try {
       const assetPath = resolveAsset(request.url);
-      const body = await fs.promises.readFile(assetPath);
+      // Stream through Chromium instead of retaining a complete model Buffer
+      // in the main process and copying it into a second Response allocation.
+      const asset = await net.fetch(pathToFileURL(assetPath).toString(), { signal: request.signal });
       const extension = path.extname(assetPath).toLowerCase();
       const contentTypes = {
         '.vrm': 'model/gltf-binary',
@@ -446,14 +457,13 @@ async function registerAssetProtocol() {
         '.json': 'application/json; charset=utf-8',
         '.png': 'image/png',
       };
-      return new Response(body, {
-        status: 200,
-        headers: {
-          'Content-Type': contentTypes[extension] || 'application/octet-stream',
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'public, max-age=31536000, immutable',
-        },
-      });
+      const headers = new Headers(asset.headers);
+      headers.set('Content-Type', contentTypes[extension] || 'application/octet-stream');
+      headers.set('Access-Control-Allow-Origin', '*');
+      // Model URLs already identify local files. Do not cache another full
+      // body or serve stale bytes after a local reimport/reload.
+      headers.set('Cache-Control', 'no-store');
+      return new Response(asset.body, { status: asset.status, headers });
     } catch (error) {
       log('ERROR', 'Asset request failed', String(error));
       return new Response('Not found', { status: 404 });
@@ -775,7 +785,7 @@ function patchSettings(patch) {
 }
 
 function applyAutoStart(enabled) {
-  if (!app.isPackaged || IS_AUTOMATED_TEST) return;
+  if (!app.isPackaged || IS_AUTOMATED_TEST || IS_VISUAL_REVIEW) return;
   const loginPath = stableExecutablePath();
   const current = app.getLoginItemSettings({ path: loginPath });
   if (current.openAtLogin !== enabled) {
@@ -840,7 +850,7 @@ function stopAutonomousMovement(persist = true, faceViewer = false) {
 function scheduleAutonomy(delayMs, allowWhilePanelOpen = false) {
   clearTimeout(autonomyTimer);
   autonomyTimer = null;
-  if ((IS_AUTOMATED_TEST && !IS_INTERACTION_TEST) || !runtimeIsReady || !settingsStore) return;
+  if ((IS_AUTOMATED_TEST && !IS_INTERACTION_TEST) || !runtimeIsReady || !settingsStore || stageSuspended) return;
   const settings = settingsStore.get();
   if (!settings.autonomousBehavior || settings.lockPosition) return;
   if (interactionPanelOpen && !allowWhilePanelOpen) return;
@@ -878,7 +888,7 @@ function setInteractionPanelOpen(open) {
 }
 
 function startAutonomousWalk() {
-  if (!runtimeIsReady || autonomyMove || autonomyMoveTimer || !mainWindow || mainWindow.isDestroyed()) return false;
+  if (!runtimeIsReady || stageSuspended || autonomyMove || autonomyMoveTimer || !mainWindow || mainWindow.isDestroyed()) return false;
   const settings = settingsStore.get();
   const bounds = mainWindow.getBounds();
   const currentDisplay = screen.getDisplayNearestPoint({
@@ -1222,10 +1232,10 @@ function rebuildTrayMenu() {
   const settings = settingsStore.get();
   const activeName = activeCharacterRecord().manifest.displayName;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: `显示${activeName}`, click: () => { mainWindow.showInactive(); mainWindow.setAlwaysOnTop(settings.alwaysOnTop); } },
+    { label: `显示${activeName}`, click: showCompanionWindow },
     { label: `隐藏${activeName}`, click: () => mainWindow.hide() },
     { type: 'separator' },
-    { label: '详细设置…', click: () => { mainWindow.showInactive(); sendCommand('show-settings'); } },
+    { label: '详细设置…', click: () => { showCompanionWindow(); sendCommand('show-settings'); } },
     { label: '切换角色', submenu: characterSubmenu() },
     { label: '始终置顶', type: 'checkbox', checked: settings.alwaysOnTop, click: () => toggleSetting('alwaysOnTop') },
     { label: '锁定当前位置', type: 'checkbox', checked: settings.lockPosition, click: () => toggleSetting('lockPosition') },
@@ -1243,10 +1253,28 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip(`YachiyoDesk · ${activeCharacterRecord().manifest.displayName}`);
   tray.on('click', () => {
-    if (mainWindow.isVisible()) mainWindow.hide();
-    else mainWindow.showInactive();
+    if (mainWindow.isVisible() && !mainWindow.isMinimized()) mainWindow.hide();
+    else showCompanionWindow();
   });
   rebuildTrayMenu();
+}
+
+function showCompanionWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.showInactive();
+  mainWindow.setAlwaysOnTop(settingsStore.get().alwaysOnTop);
+}
+
+function recoverChangedDisplay() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  clearTimeout(windowDragTimer);
+  windowDragTimer = null;
+  windowDrag = null;
+  stopAutonomousMovement(false);
+  const bounds = clampCurrentWindowToDisplay();
+  if (bounds) settingsStore.patch({ window: bounds });
+  scheduleAutonomy(350);
 }
 
 function flushWindowDrag() {
@@ -1309,6 +1337,22 @@ function updateWindowDrag(point, finish = false) {
   }
 }
 
+function updateStageLifecycle() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  stageSuspended = !mainWindow.isVisible() || mainWindow.isMinimized();
+  sendCommand('stage-suspended', stageSuspended);
+  if (stageSuspended) {
+    clearTimeout(autonomyTimer);
+    autonomyTimer = null;
+    stopAutonomousMovement();
+    clearTimeout(windowDragTimer);
+    windowDragTimer = null;
+    windowDrag = null;
+  } else if (runtimeIsReady) {
+    scheduleAutonomy(350);
+  }
+}
+
 async function createWindow() {
   const settings = settingsStore.get();
   mainWindow = new BrowserWindow({
@@ -1345,6 +1389,9 @@ async function createWindow() {
     },
   });
 
+  stageSuspended = true;
+  protectCompanionWindow(mainWindow, shell);
+  for (const event of ['show', 'hide', 'minimize', 'restore']) mainWindow.on(event, updateStageLifecycle);
   mainWindow.setMenu(null);
   mainWindow.setAlwaysOnTop(settings.alwaysOnTop);
   mainWindow.setVisibleOnAllWorkspaces(settings.alwaysOnTop, { visibleOnFullScreen: false });
@@ -1394,13 +1441,18 @@ async function createWindow() {
 function bindIpc() {
   ipcMain.handle('app:get-bootstrap', () => {
     const active = activeCharacterRecord();
+    const physics = resolvePmxPhysicsAsset(active.directory, active.manifest);
     return {
       appVersion: app.getVersion(),
       platform: process.platform,
       isPackaged: app.isPackaged,
       smokeTest: IS_AUTOMATED_TEST || IS_VISUAL_REVIEW,
       modelUrl: IS_ONBOARDING_TEST ? null : active.modelUrl,
+      pmxPhysicsUrl: physics.filename
+        ? active.modelUrl?.replace(/model\.vrm$/, 'physics.pmx') : undefined,
+      pmxPhysicsError: physics.error,
       setupRequired: IS_ONBOARDING_TEST || !active.modelUrl,
+      stageSuspended,
       character: active.manifest,
       settings: settingsStore.get(),
     };
@@ -1538,6 +1590,7 @@ function bindIpc() {
     try {
       const sourcePath = selection.filePaths[0];
       const recommended = recommendedYachiyoImport(sourcePath, 'pmx');
+      const sourceSha256 = recommended?.sourceSha256 || hashFileSha256(sourcePath);
       const rawBase = path.parse(sourcePath).name
         .normalize('NFKD')
         .toLowerCase()
@@ -1552,6 +1605,7 @@ function bindIpc() {
       fs.mkdirSync(directory, { recursive: true });
       const outputPath = path.join(directory, 'model.vrm');
       const reportPath = path.join(directory, 'conversion-report.json');
+      if (!recommended) preservePmxPhysics(sourcePath, directory, sourceSha256);
       const conversion = await convertPmxToVrm({
         sourcePath,
         outputPath,
@@ -1563,6 +1617,7 @@ function bindIpc() {
         }),
       });
       const metadata = inspectVrmFile(outputPath);
+      if (hashFileSha256(sourcePath) !== sourceSha256) throw new Error('源 PMX 在转换期间发生变化，请重新导入。');
       const manifest = {
         id,
         displayName: metadata.displayName,
@@ -1570,6 +1625,8 @@ function bindIpc() {
         creator: metadata.creator,
         sourceFileName: path.basename(sourcePath),
         sourceFormat: 'pmx',
+        sourceSha256,
+        modelSha256: hashFileSha256(outputPath),
         model: 'model.vrm',
         credit: `${metadata.displayName} · 本机 PMX 自动转换`,
         messages: recommended?.messages || genericMessages(metadata.displayName),
@@ -1651,6 +1708,9 @@ function bindIpc() {
 
   ipcMain.on('runtime:ready', async (_event, details) => {
     runtimeIsReady = true;
+    // Showing the native window may precede installation of renderer listeners.
+    // Reconcile again at readiness so an initially hidden load cannot stay paused.
+    updateStageLifecycle();
     updateAvatarViewportBounds(details?.avatarViewportBounds, true);
     log('INFO', 'Avatar runtime ready', details);
     if (IS_SMOKE && modelSmokeRunning) return;
@@ -1810,7 +1870,16 @@ function bindIpc() {
       );
 
       await mainWindow.webContents.executeJavaScript(
-        `document.body.classList.add('companion-dock-open')`,
+        `(() => {
+          const canvas = document.querySelector('#stage');
+          const rect = canvas.getBoundingClientRect();
+          for (const y of [.5, .65, .8, .4]) for (const x of [.5, .42, .58]) {
+            canvas.dispatchEvent(new PointerEvent('pointermove', { bubbles: true,
+              clientX: rect.left + rect.width * x, clientY: rect.top + rect.height * y }));
+            if (document.body.classList.contains('over-avatar')) return;
+          }
+          throw new Error('No visible avatar hit for companion dock hover');
+        })()`,
         true,
       );
       await new Promise((resolve) => setTimeout(resolve, 220));
@@ -1824,7 +1893,7 @@ function bindIpc() {
         true,
       );
       await mainWindow.webContents.executeJavaScript(
-        `document.body.classList.remove('companion-dock-open')`,
+        `window.dispatchEvent(new PointerEvent('pointerout', { relatedTarget: null }))`,
         true,
       );
       const uiTest = {
@@ -1844,6 +1913,7 @@ function bindIpc() {
           && Boolean(dockState?.visible),
       };
       if (!uiTest.passed) throw new Error(`Companion UI test failed: ${JSON.stringify(uiTest)}`);
+      const stageLifecycleTest = await runStageLifecycleSmoke();
       const characterLifecycleTest = await runCharacterLifecycleSmoke();
       fs.writeFileSync(
         path.join(artifacts, 'smoke-diagnostics.json'),
@@ -1855,6 +1925,7 @@ function bindIpc() {
           focusTest,
           petTest,
           uiTest,
+          stageLifecycleTest,
           characterLifecycleTest,
           screenshotPath,
           settingsScreenshotPath,
@@ -1937,6 +2008,39 @@ async function runOnboardingTest() {
   if (!result.ok) throw new Error(JSON.stringify(result));
 }
 
+async function runStageLifecycleSmoke() {
+  const read = () => mainWindow.webContents.executeJavaScript('window.__desktopPetPerformance()', true);
+  const waitFor = async predicate => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const stats = await read();
+      if (predicate(stats)) return stats;
+      await new Promise(resolve => setTimeout(resolve, 60));
+    }
+    throw new Error('Window lifecycle did not reach the expected render state');
+  };
+  const stopped = async () => {
+    const before = await waitFor(stats => stats.suspended);
+    await new Promise(resolve => setTimeout(resolve, 240));
+    const after = await read();
+    if (!after.suspended || after.renderedFrames !== before.renderedFrames) throw new Error('Hidden/minimized renderer kept advancing');
+    return after.renderedFrames;
+  };
+  const before = await read();
+  mainWindow.hide();
+  const hiddenFrames = await stopped();
+  if (autonomyMove || autonomyMoveTimer || autonomyTimer) throw new Error('Hidden companion retained autonomous timers');
+  showCompanionWindow();
+  const shown = await waitFor(stats => !stats.suspended && stats.renderedFrames > hiddenFrames);
+  mainWindow.minimize();
+  const minimizedFrames = await stopped();
+  showCompanionWindow();
+  const restored = await waitFor(stats => !stats.suspended && stats.renderedFrames > minimizedFrames);
+  return { passed: true, hiddenPaused: true, minimizedPaused: true, resumed: true,
+    beforeFrames: before.renderedFrames, hiddenFrames, shownFrames: shown.renderedFrames,
+    minimizedFrames, restoredFrames: restored.renderedFrames };
+}
+
 async function runCharacterLifecycleSmoke() {
   const originalId = settingsStore.get().activeCharacterId;
   const source = characterRecord(originalId);
@@ -1944,6 +2048,12 @@ async function runCharacterLifecycleSmoke() {
   const targetDirectory = path.join(userCharactersRoot(), targetId);
   fs.mkdirSync(targetDirectory, { recursive: true });
   fs.copyFileSync(path.join(source.directory, 'model.vrm'), path.join(targetDirectory, 'model.vrm'));
+  const originalPhysics = path.join(source.directory, 'physics.pmx');
+  if (fs.existsSync(originalPhysics)) fs.copyFileSync(originalPhysics, path.join(targetDirectory, 'physics.pmx'));
+  else fs.rmSync(path.join(targetDirectory, 'physics.pmx'), { force: true });
+  // The isolated profile can be reused for another verification run.
+  const zooms = { ...settingsStore.get().characterZooms, [targetId]: 0.35 };
+  settingsStore.patch({ characterZooms: zooms });
   const manifest = JSON.parse(fs.readFileSync(path.join(source.directory, 'character.json'), 'utf8'));
   fs.writeFileSync(path.join(targetDirectory, 'character.json'), JSON.stringify({ ...manifest, id: targetId }));
   const waitReady = async () => {
@@ -2495,9 +2605,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (!mainWindow) return;
-    mainWindow.showInactive();
-    mainWindow.setAlwaysOnTop(settingsStore.get().alwaysOnTop);
+    showCompanionWindow();
   });
 
   app.whenReady().then(async () => {
@@ -2512,8 +2620,10 @@ if (!gotLock) {
     await registerAssetProtocol();
     bindIpc();
     await createWindow();
+    screen.on('display-removed', recoverChangedDisplay);
+    screen.on('display-metrics-changed', recoverChangedDisplay);
     createTray();
-    if (app.isPackaged && !IS_AUTOMATED_TEST) {
+    if (app.isPackaged && !IS_AUTOMATED_TEST && !IS_VISUAL_REVIEW) {
       const shortcut = createDesktopShortcut();
       log(shortcut.ok ? 'INFO' : 'ERROR', 'Desktop shortcut result', shortcut);
     }

@@ -110,6 +110,9 @@ export interface BootstrapData {
   smokeTest: boolean;
   modelUrl: string | null;
   setupRequired?: boolean;
+  stageSuspended?: boolean;
+  pmxPhysicsUrl?: string;
+  pmxPhysicsError?: string;
   character: CharacterManifest;
   settings: AppSettings;
 }
@@ -134,6 +137,7 @@ export interface CharacterImportResult {
 }
 
 export type AppCommand =
+  | 'stage-suspended'
   | 'flush-interaction-settings'
   | 'show-settings'
   | 'show-characters'
@@ -184,15 +188,7 @@ export interface RuntimeDiagnostics {
     lateralGaitScale: number;
     height: number;
   } | null;
-  garmentContact: {
-    enabled: boolean;
-    garmentMeshes: number;
-    garmentVertices: number;
-    bodyVertices: number;
-    lastContacts: number;
-    averageMs: number;
-    fallbackReason: string;
-  } | { fallbackReason: string; candidates: string[] } | null;
+  garmentContact: Record<string, unknown> | null;
   avatarViewportBounds: AvatarViewportBounds;
 }
 
@@ -203,6 +199,8 @@ export interface AvatarViewportBounds {
 }
 
 export interface RuntimePerformanceStats {
+  renderedFrames: number;
+  suspended: boolean;
   averageFps: number;
   averageFrameMs: number;
   p95FrameMs: number;

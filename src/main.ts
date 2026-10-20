@@ -65,6 +65,7 @@ runtime = new AvatarRuntime(canvas, bootstrap, {
     window.yachiyoDesk.runtimeSetupRequired();
   },
   onViewportBounds: (bounds) => window.yachiyoDesk.runtimeViewportBounds(bounds),
+  onFrame: () => { if (ui.isSpeechVisible()) ui.positionSpeech(runtime.headScreenPosition()); },
 });
 
 interaction = new InteractionController(canvas, runtime, ui, currentSettings);
@@ -88,7 +89,9 @@ if (bootstrap.smokeTest) {
 }
 
 const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }) => {
-  if (command === 'flush-interaction-settings' && typeof payload === 'number') {
+  if (command === 'stage-suspended' && typeof payload === 'boolean') {
+    runtime.setSuspended(payload);
+  } else if (command === 'flush-interaction-settings' && typeof payload === 'number') {
     window.yachiyoDesk.interactionSettingsFlushed(payload, interaction.flushBeforeUnload());
   } else if (command === 'show-settings') {
     window.yachiyoDesk.noteUserActivity();
@@ -154,13 +157,6 @@ const handleWindowResize = (): void => {
 };
 window.addEventListener('resize', handleWindowResize, { passive: true });
 
-let speechFrame = 0;
-function updateSpeechPosition(): void {
-  ui.positionSpeech(runtime.headScreenPosition());
-  speechFrame = requestAnimationFrame(updateSpeechPosition);
-}
-speechFrame = requestAnimationFrame(updateSpeechPosition);
-
 const telemetryTimer = window.setInterval(() => {
   const stats = runtime.getPerformanceStats();
   ui.updatePerformance(stats);
@@ -170,7 +166,6 @@ const telemetryTimer = window.setInterval(() => {
 
 window.addEventListener('beforeunload', () => {
   interaction.flushBeforeUnload();
-  cancelAnimationFrame(speechFrame);
   window.clearInterval(telemetryTimer);
   cancelAnimationFrame(resizeFrame);
   window.removeEventListener('resize', handleWindowResize);

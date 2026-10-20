@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 
 const MAX_PMX_BYTES = 1024 * 1024 * 1024;
 const MAX_LOG_CHARS = 16000;
@@ -144,12 +145,16 @@ async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs =
   const resolvedConverter = converter || resolvePmxConverter();
   inspectConverterDependencies(resolvedConverter);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   const runAttempt = (compatibilityMode) => new Promise((resolve, reject) => {
+    // A previous import's report cannot describe this process. In particular,
+    // stale FAIL/PASS JSON must not suppress native-crash recovery.
+    const attemptReportPath = `${reportPath}.attempt-${randomUUID()}.json`;
     const child = spawn(resolvedConverter.blenderPath, [
       '--background',
       '--factory-startup',
       '--python', resolvedConverter.scriptPath,
-      '--', sourcePath, outputPath, reportPath,
+      '--', sourcePath, outputPath, attemptReportPath,
       ...(compatibilityMode ? ['--compatibility-mode'] : []),
     ], {
       windowsHide: true,
@@ -178,12 +183,24 @@ async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs =
     child.stderr.on('data', (chunk) => { stderr = appendLimited(stderr, chunk); });
     child.once('error', (error) => finish(new Error(`无法启动 PMX 转换引擎：${error.message}`)));
     child.once('close', (code, signal) => {
+      if (settled) {
+        fs.rmSync(attemptReportPath, { force: true });
+        fs.rmSync(`${attemptReportPath}.tmp`, { force: true });
+        return;
+      }
       let report = null;
       try {
-        report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+        report = JSON.parse(fs.readFileSync(attemptReportPath, 'utf8'));
       } catch {
         // The process output below still provides a useful diagnostic.
       }
+      if (report) {
+        try { fs.renameSync(attemptReportPath, reportPath); }
+        catch (error) { finish(new Error(`无法保存转换报告：${error.message}`)); return; }
+      } else {
+        fs.rmSync(attemptReportPath, { force: true });
+      }
+      fs.rmSync(`${attemptReportPath}.tmp`, { force: true });
       if (code !== 0 || report?.result !== 'PASS' || !fs.existsSync(outputPath)) {
         const detail = report?.error || stderr.trim().split(/\r?\n/).slice(-8).join('\n') || `退出代码 ${code}${signal ? `，信号 ${signal}` : ''}`;
         const error = new Error(`PMX 转换失败：${detail}`);
