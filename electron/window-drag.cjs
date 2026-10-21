@@ -76,10 +76,18 @@ function clampDragPosition(position, displayBounds, windowSize, viewportBounds) 
   if (displayWidth <= 0 || displayHeight <= 0 || windowWidth <= 0 || windowHeight <= 0) return null;
   const horizontal = horizontalWindowRange(displayBounds, windowWidth, viewportBounds);
   if (!horizontal) return null;
-  const maximumY = displayY + Math.max(0, displayHeight - windowHeight);
+  let minimumY = displayY;
+  let maximumY = displayY + Math.max(0, displayHeight - windowHeight);
+  if ([viewportBounds?.footY,viewportBounds?.avatarHeight,viewportBounds?.canvasHeight].every(Number.isFinite)
+    && viewportBounds.canvasHeight > 0 && viewportBounds.avatarHeight > 0) {
+    const ratio = windowHeight / viewportBounds.canvasHeight;
+    minimumY = displayY - (viewportBounds.footY-viewportBounds.avatarHeight)*ratio;
+    maximumY = displayY + displayHeight - viewportBounds.footY*ratio;
+    if (maximumY < minimumY) minimumY = maximumY;
+  }
   return {
     x: Math.round(Math.min(horizontal.maximumX, Math.max(horizontal.minimumX, x))),
-    y: Math.round(Math.min(maximumY, Math.max(displayY, y))),
+    y: Math.round(Math.min(maximumY, Math.max(minimumY, y))),
   };
 }
 

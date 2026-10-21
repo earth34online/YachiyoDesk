@@ -1,6 +1,6 @@
 {
   "name": "yachiyo-desk",
-  "version": "1.0.9",
+  "version": "2.0.0-beta.1",
   "private": true,
   "description": "A high-quality local desktop companion with VRM/PMX character import",
   "author": "Excalibur",
@@ -26,6 +26,8 @@
     "@moeru/three-mmd": "0.2.0-beta.2",
     "@moeru/three-mmd-physics-ammo": "0.2.0-beta.2",
     "@pixiv/three-vrm": "3.5.5",
+    "@pixiv/three-vrm-animation": "3.5.5",
+    "gltf-validator": "2.0.0-dev.3.10",
     "three": "0.185.1",
     "three-mesh-bvh": "0.9.15"
   },
@@ -50,11 +52,19 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "skills/**/*",
       "package.json",
       "THIRD_PARTY_NOTICES.md",
       "!node_modules/**/*"
     ],
     "extraResources": [
+      { "from": "electron/window-surfaces.ps1", "to": "window-surfaces.ps1" },
+      { "from": "assets/motions", "to": "motions", "filter": ["**/*"] },
+      {
+        "from": "node_modules/gltf-validator",
+        "to": "gltf-validator",
+        "filter": ["index.js", "gltf_validator.dart.js", "LICENSE", "NOTICES", "package.json"]
+      },
       {
         "from": "build/icon.png",
         "to": "app-icons/icon.png"

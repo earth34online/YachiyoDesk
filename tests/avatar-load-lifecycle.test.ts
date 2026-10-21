@@ -34,7 +34,9 @@ function fixture() {
 }
 function model() {
   const scene = new THREE.Group();
-  return { scene, userData: { vrm: { scene, meta: { metaVersion: '1' }, springBoneManager: { joints: [], setInitState: vi.fn() } } }, parser: { json: {} } };
+  return { scene, userData: { vrm: { scene, meta: { metaVersion: '1' },
+    humanoid: { getRawBoneNode: () => null, rawHumanBones: {} },
+    springBoneManager: { joints: [], setInitState: vi.fn() } } }, parser: { json: {} } };
 }
 beforeEach(() => { pending.length = 0; vi.spyOn(VRMUtils, 'deepDispose'); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });

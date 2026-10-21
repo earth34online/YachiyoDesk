@@ -1,17 +1,23 @@
 import './style.css';
+import './companion.css';
 import { AppUI } from './AppUI';
 import { AvatarRuntime } from './AvatarRuntime';
 import { InteractionController } from './InteractionController';
+import { CompanionUI } from './CompanionUI';
 import type { AppSettings, AutonomyCommand, ReactionName } from './types';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#stage');
 if (!canvas) throw new Error('渲染画布不存在。');
 
 const bootstrap = await window.yachiyoDesk.getBootstrap();
+document.title = `YachiyoDesk ${bootstrap.appVersion}`;
+const versionLabel=document.querySelector('#app-version');
+if(versionLabel)versionLabel.textContent=`YACHIYO DESK · v${bootstrap.appVersion}`;
 const DEFAULT_CHARACTER_ZOOM = 0.35;
 let currentSettings = bootstrap.settings;
 let runtime: AvatarRuntime;
 let interaction: InteractionController;
+let companion: CompanionUI;
 
 async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
   interaction?.cancelPendingSettings(patch);
@@ -19,6 +25,7 @@ async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
   runtime.setSettings(currentSettings);
   window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
   ui.updateSettings(currentSettings);
+  companion?.updateSettings(currentSettings);
 }
 
 function previewSettingsPatch(patch: Partial<AppSettings>): void {
@@ -28,17 +35,21 @@ function previewSettingsPatch(patch: Partial<AppSettings>): void {
 }
 
 function triggerReaction(reaction: ReactionName, speechKey: string = reaction): void {
+  companion?.interruptScene();
   window.yachiyoDesk.noteUserActivity();
   runtime.triggerReaction(reaction);
   ui.showSpeech(speechKey);
 }
 
 const ui = new AppUI(currentSettings, bootstrap.character, {
+  onImportResult: result => companion.handleImport(result),
+  renderExtension: (page, container) => companion?.attach(page, container),
   onSettingsPatch: (patch) => { void applySettingsPatch(patch); },
   onSettingsPreview: previewSettingsPatch,
   onCloseSettings: () => interaction.reevaluateClickThrough(),
   onInteractionStateChanged: () => interaction?.reevaluateClickThrough(),
   onResetPose: () => {
+    companion?.interruptScene();
     runtime.resetPose();
     void applySettingsPatch({ zoom: DEFAULT_CHARACTER_ZOOM, rotationY: 0 });
     ui.showToast('已恢复默认姿态');
@@ -69,6 +80,16 @@ runtime = new AvatarRuntime(canvas, bootstrap, {
 });
 
 interaction = new InteractionController(canvas, runtime, ui, currentSettings);
+companion = new CompanionUI({ runtime, bootstrap, characterId: bootstrap.character.id,
+  toast: text => ui.showToast(text), speech: text => ui.showTextSpeech(text),
+  rotate: radians => runtime.setSettings({ ...currentSettings, rotationY: radians }),
+  restoreView: () => runtime.setSettings(currentSettings),
+  settingsPatch: applySettingsPatch,
+});
+const interruptScene = (): void => companion.interruptScene();
+canvas.addEventListener('pointerdown',interruptScene);
+canvas.addEventListener('wheel',interruptScene,{passive:true});
+document.querySelector('#dock-more')?.insertAdjacentElement('beforebegin', Object.assign(document.createElement('button'), { type: 'button', className: 'dock-more', textContent: '♡ 与角色聊天', onclick: () => ui.showSettings('chat') }));
 document.querySelector<HTMLButtonElement>('#setup-open-characters')?.addEventListener('click', () => {
   ui.showSettings('characters');
 });
@@ -85,11 +106,21 @@ if (bootstrap.smokeTest) {
     __desktopPetViewportBounds: () => runtime.avatarViewportBounds(),
     __desktopPetPerformance: () => runtime.getPerformanceStats(),
     __desktopPetBindPose: (active: boolean) => runtime.setDiagnosticBindPose(active),
+    __desktopPetPlayMotion: (bytes: number[], loop: boolean) => runtime.playMotion(new Uint8Array(bytes).buffer, 'Runtime verification', loop),
+    __desktopPetStopMotion: () => runtime.stopMotion(),
+    __desktopPetMotionPlaying: () => runtime.motionPlaying,
+    __desktopPetTriggerReaction: (reaction: ReactionName) => runtime.triggerReaction(reaction),
+    __desktopPetContact: (state: import('./DesktopContactPose').DesktopContactState) => runtime.setDesktopContact(state),
+    __desktopPetContactSnapshot: () => runtime.desktopContactSnapshot(),
   });
 }
 
 const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }) => {
-  if (command === 'stage-suspended' && typeof payload === 'boolean') {
+  if (command === 'desktop-contact-status') {
+    ui.showToast('窗口边缘检测暂不可用，拖放落地和屏幕边缘仍可使用');
+  } else if (command === 'desktop-contact' && payload && typeof payload === 'object' && 'phase' in payload) {
+    runtime.setDesktopContact(payload as import('./DesktopContactPose').DesktopContactState);
+  } else if (command === 'stage-suspended' && typeof payload === 'boolean') {
     runtime.setSuspended(payload);
   } else if (command === 'flush-interaction-settings' && typeof payload === 'number') {
     window.yachiyoDesk.interactionSettingsFlushed(payload, interaction.flushBeforeUnload());
@@ -99,6 +130,7 @@ const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }
   } else if (command === 'show-characters') {
     ui.showSettings('characters');
   } else if (command === 'reset-pose') {
+    companion.interruptScene();
     runtime.resetPose();
     void applySettingsPatch({ zoom: DEFAULT_CHARACTER_ZOOM, rotationY: 0 });
     ui.showToast('已恢复默认姿态');
@@ -112,6 +144,8 @@ const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }
     if (allowed.has(payload as ReactionName)) {
       triggerReaction(payload as ReactionName);
     }
+  } else if(command==='play-motion' && payload && typeof payload==='object' && 'id' in payload && typeof payload.id==='string'){
+    void companion.playSavedMotion(payload.id).catch(error=>ui.showToast(error.message));
   } else if (command === 'autonomous-reaction') {
     const allowed = new Set<ReactionName>([
       'greet', 'joy', 'surprised', 'angry', 'sleepy', 'poke',
@@ -122,6 +156,7 @@ const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }
   } else if (command === 'speech' && typeof payload === 'string') {
     ui.showSpeech(payload);
   } else if (command === 'autonomy' && payload && typeof payload === 'object') {
+    if((payload as AutonomyCommand).action==='walk')companion.interruptScene();
     runtime.setAutonomy(payload as AutonomyCommand);
   } else if (command === 'dismiss-inactive-ui') {
     ui.hideSettings();
@@ -143,6 +178,7 @@ const removeSettingsListener = window.yachiyoDesk.onSettingsChanged((settings) =
   runtime.setSettings(currentSettings);
   window.yachiyoDesk.runtimeViewportBounds(runtime.avatarViewportBounds());
   ui.updateSettings(currentSettings);
+  companion.updateSettings(currentSettings);
 });
 const removeFocusListener = window.yachiyoDesk.onFocusChanged((status) => ui.updateFocus(status));
 const removePetListener = window.yachiyoDesk.onPetStatusChanged((status) => ui.updatePetStatus(status));
@@ -165,6 +201,9 @@ const telemetryTimer = window.setInterval(() => {
 }, 2000);
 
 window.addEventListener('beforeunload', () => {
+  canvas.removeEventListener('pointerdown',interruptScene);
+  canvas.removeEventListener('wheel',interruptScene);
+  companion.dispose();
   interaction.flushBeforeUnload();
   window.clearInterval(telemetryTimer);
   cancelAnimationFrame(resizeFrame);

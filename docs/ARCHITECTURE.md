@@ -1,8 +1,12 @@
 # 架构与扩展点
 
-本文对应 1.0.9（1.x 收官版），维护日期为 2026-10-20；验证和交付状态见 [版本记录](RELEASE_20261020.md)。
+本文对应 2.0 开发版，维护日期为 2026-10-21；1.x 交付记录保留在 [版本记录](RELEASE_20261020.md)，2.0 验收见 [开发记录](DEVELOPMENT_2.0.md)。
 
 YachiyoDesk 将“桌面窗口控制”“角色资产管理”“VRM 运行时”“动作系统”和“UI”分层。这样八千代的特调参数可以留在角色 manifest 中，未来导入的任意 VRM/PMX 仍然走通用标准。
+
+2026-10-21：`jointDynamics.ts` 保留打断时的关节速度，`armContactSurface.ts` 和 `headContactSurface.ts` 依据衣物、头发及手指真实表面求解避让。`skinSeams.ts` 修复有严格绑定共识的分离接缝；`skinGradients.ts` 只在已确认损坏网格上按原骨骼支持域、非负和单位和约束求解蒙皮梯度。刚性锚点、完好衣物、UV、几何、褶皱和原文件保持。
+
+原始 PMX 由导入指纹，或新建且绑定源文件/模型双哈希的单独验证记录核实；原生 Ammo 与 VRM SpringBone 不重复驱动骨骼。`springArmContacts.ts` 仅在通用转换回退中复用/对齐已有手臂形状。`automaticSpringContacts.ts` 只响应导入时确认缺失的配置：识别身体覆盖、在非动态可见表面内拟合胶囊，并约束静止发梢。已有配置、八千代、缺动态链和歧义来源不被自动改写。`contact-configuration.cjs` 检查导入状态与有限参数，用户 API 计划只写暂存副本、清除加载确认并重新预览。取消与迟到结果按代际及独立请求控制器隔离。证据见 [审查记录](REVIEW_20261021.md)。
 
 ## 分层关系
 
@@ -32,7 +36,13 @@ flowchart TB
 - 校验 VRM，调用 Blender 完成 PMX→VRM；
 - 通过 tray/menu 向 renderer 发送动作和设置命令。
 
-主进程永远不把用户模型上传到网络。`appasset://` 只读取打包资源，`user-characters://` 只允许读取经过路径校验的用户角色目录。
+模型原文件不上传。AI 修复仅在用户同意后，将界面列出的文件名、节点和诊断发送到使用者配置的接口；可选生成贴图另需明确授权。`appasset://` 读取打包资源或有效导入票据下的模型预览，`user-characters://` 只读取经过路径校验的用户角色目录。
+
+`electron/companion-host.cjs` 统一校验调用来源并协调连接、会话、动作收藏、快照和导入预览。密钥由 Windows `safeStorage` 加密，网络请求和工具执行留在主进程；renderer 不读取密钥。`ai-service.cjs` 捕获每次请求的角色、模型和会话版本，取消、角色切换及关闭窗口会中止请求。语音只在一次录音获得同意后开放麦克风，停止即释放；图片和画面先预览，再发送。
+
+导入先写入隐藏暂存目录，由独立 worker 执行 glTF 结构检查。用户看到真实运行时预览并确认后，才移入角色库。AI 只能改写已有骨骼映射、重映射清单内贴图或生成已获准的贴图；模型返回的代码、命令和任意路径不执行。处理规则随程序分发于 `skills/avatar-import-repair`。
+
+`src/MotionPlayer.ts` 使用官方 VRMA 插件重定向本地动作，按照 AIRI 的方法将根位置轨道锚定到当前模型的局部髋部原位。切换与停止使用连续过渡，物理在最终姿态之后更新。可选自然待机仅用于通用角色，八千代原生动作保持独立。PMX 绑定桥区分动作控制的人体骨骼与动态刚体；物理回写不累积人体缩放，也不把刚体矩阵误差当作衣物尺寸变化。
 
 ## Renderer 与 VRM 运行时
 
@@ -119,3 +129,9 @@ my-character/
 - 新增设置：在 `types.ts`、`settings.cjs`、preload、UI 和持久化测试中同步更新；
 - 调整 PMX 映射：修改 `converter/pmx_to_vrm.py`，不要在 renderer 内写只适用于某一个模型的硬编码；
 - 改进性能：优先测量帧耗时、draw call 和纹理数量，避免无证据地降低模型质量。
+
+## 2026-10-21 桌面接触功能
+
+新增主进程 DesktopContacts 状态机和只读 WindowSurfaces 辅助进程，输出窗口矩形转 DIP，扣除被遮挡顶边并维护双脚支撑范围。renderer DesktopContactPose 在原动画之后、humanoid 与衣发物理之前做骨盆/整腿 IK 和近边手势。窗口位置与脚底目标来自同一支撑状态，保留原网格、蒙皮与专用角色路径。PowerShell 文件作为 extraResources 分发，避免外部进程读取 ASAR。
+
+详见 [桌面接触功能与验收](DESKTOP_CONTACTS_20261021.md)。

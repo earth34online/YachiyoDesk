@@ -429,7 +429,7 @@ def image_alpha_mode(image: bpy.types.Image | None) -> str | None:
     zero_ratio = zero_count / max(1, len(alpha))
     mid_ratio = mid_count / max(1, len(alpha))
     if zero_count == 0:
-        return None
+        return "BLEND"
     # Hair cards, eye decals and lace use a mostly binary alpha with a small
     # anti-aliased edge. MASK keeps depth writes enabled and avoids the
     # front-half-of-clothing disappearance caused by BLEND sorting. Reserve

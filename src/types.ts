@@ -8,6 +8,7 @@ export interface WindowBounds {
 }
 
 export interface AppSettings {
+  naturalIdle: boolean;
   schemaVersion: number;
   alwaysOnTop: boolean;
   clickThrough: boolean;
@@ -16,6 +17,8 @@ export interface AppSettings {
   physics: boolean;
   idleMotion: boolean;
   autonomousBehavior: boolean;
+  desktopContacts: boolean;
+  windowContacts: boolean;
   reactions: boolean;
   speech: boolean;
   contactShadow: boolean;
@@ -46,6 +49,14 @@ export interface CharacterManifest {
   messages: Record<string, string[]>;
   behavior: BehaviorProfile;
   motionProfile: MotionProfile;
+  contactConfiguration?: ContactConfiguration;
+}
+
+export interface ContactConfiguration {
+  mode: 'automatic';
+  bodyMesh?: number;
+  disabledBones?: string[];
+  radiusScale?: Record<string, number>;
 }
 
 export interface MotionProfile {
@@ -129,6 +140,8 @@ export interface InstalledCharacter {
 }
 
 export interface CharacterImportResult {
+  preview?: { token: string; manifest: CharacterManifest; modelUrl: string; pmxPhysicsUrl?: string; warnings?: string[]; quality: { errors: number; warnings: number } };
+  repair?: { token: string; diagnosis: Record<string, unknown> };
   canceled: boolean;
   character?: InstalledCharacter;
   error?: string;
@@ -137,6 +150,9 @@ export interface CharacterImportResult {
 }
 
 export type AppCommand =
+  | 'desktop-contact'
+  | 'desktop-contact-status'
+  | 'play-motion'
   | 'stage-suspended'
   | 'flush-interaction-settings'
   | 'show-settings'
@@ -196,6 +212,11 @@ export interface AvatarViewportBounds {
   left: number;
   right: number;
   canvasWidth: number;
+  canvasHeight?: number;
+  footY?: number;
+  footLeft?: number;
+  footRight?: number;
+  avatarHeight?: number;
 }
 
 export interface RuntimePerformanceStats {

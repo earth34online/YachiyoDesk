@@ -140,13 +140,16 @@ function describePmxConversionFailure(error) {
   return error?.message || 'PMX 转换失败，详细诊断已写入本机日志。';
 }
 
-async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs = DEFAULT_TIMEOUT_MS, converter }) {
+async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs = DEFAULT_TIMEOUT_MS, converter, signal }) {
+  const canceled=()=>Object.assign(new Error('PMX 转换已取消。'),{code:'IMPORT_CANCELED'});
+  if(signal?.aborted)throw canceled();
   validatePmxSource(sourcePath);
   const resolvedConverter = converter || resolvePmxConverter();
   inspectConverterDependencies(resolvedConverter);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   const runAttempt = (compatibilityMode) => new Promise((resolve, reject) => {
+    if(signal?.aborted){reject(canceled());return;}
     // A previous import's report cannot describe this process. In particular,
     // stale FAIL/PASS JSON must not suppress native-crash recovery.
     const attemptReportPath = `${reportPath}.attempt-${randomUUID()}.json`;
@@ -168,10 +171,13 @@ async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs =
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let aborted = false;
+    const abort=()=>{aborted=true;child.kill();};
     const finish = (error, report) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort',abort);
       if (error) {
         error.stdout ??= stdout;
         error.stderr ??= stderr;
@@ -181,13 +187,14 @@ async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs =
     };
     child.stdout.on('data', (chunk) => { stdout = appendLimited(stdout, chunk); });
     child.stderr.on('data', (chunk) => { stderr = appendLimited(stderr, chunk); });
-    child.once('error', (error) => finish(new Error(`无法启动 PMX 转换引擎：${error.message}`)));
+    child.once('error', (error) => finish(aborted?canceled():new Error(`无法启动 PMX 转换引擎：${error.message}`)));
     child.once('close', (code, signal) => {
       if (settled) {
         fs.rmSync(attemptReportPath, { force: true });
         fs.rmSync(`${attemptReportPath}.tmp`, { force: true });
         return;
       }
+      if(aborted){fs.rmSync(attemptReportPath,{force:true});fs.rmSync(`${attemptReportPath}.tmp`,{force:true});finish(canceled());return;}
       let report = null;
       try {
         report = JSON.parse(fs.readFileSync(attemptReportPath, 'utf8'));
@@ -220,6 +227,7 @@ async function convertPmxToVrm({ sourcePath, outputPath, reportPath, timeoutMs =
       child.kill();
       finish(new Error(`PMX 转换超过 ${Math.round(timeoutMs / 60000)} 分钟，已停止并回滚。`));
     }, timeoutMs);
+    signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   });
   try {
     return await runAttempt(false);

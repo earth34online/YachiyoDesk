@@ -9,10 +9,15 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clamp, damp, nextAdaptiveScale, normalizedPointer } from './math';
 import { ProceduralAnimator } from './ProceduralAnimator';
+import { DesktopContactPose, type DesktopContactState } from './DesktopContactPose';
 import { shouldCombineSkeletons } from './skin-policy';
+import { repairPmxSkinSeams } from './skinSeams';
+import { repairPmxSkinGradients } from './skinGradients';
+import { configureMissingSpringContacts, type AutomaticContactReport } from './automaticSpringContacts';
 import { GarmentContactSolver } from './garmentContact';
 import { alphaFootprint } from './avatar-footprint';
 import { prepareGenericPmxSpringSpace } from './springContactSpace';
+import { connectAuthoredArmContacts } from './springArmContacts';
 import { PmxPhysics } from './pmxPhysics';
 import { rigHitZone } from './interactionZone';
 import { updateSkinnedInteractionBounds } from './interactionBounds';
@@ -69,6 +74,41 @@ function disposeModelScene(scene: THREE.Object3D): void {
 }
 
 export class AvatarRuntime {
+  private motionPlayer: import('./MotionPlayer').MotionPlayer | null = null;
+  private motionSequence = 0;
+  private automaticContactReport: AutomaticContactReport | null = null;
+
+  springContactConfigurationSnapshot(): AutomaticContactReport | null {
+    return this.automaticContactReport ? structuredClone(this.automaticContactReport) : null;
+  }
+  private voiceMouth = 0;
+  private naturalIdleBytes: ArrayBuffer | null = null;
+  private naturalIdlePending = false;
+  private naturalIdleFailed = false;
+  private motionKind: 'natural' | 'user' | null = null;
+  private idleResumeAt = 0;
+  configureNaturalIdle(bytes: ArrayBuffer): void { this.naturalIdleBytes = bytes; this.naturalIdleFailed = false; }
+  async playMotion(bytes: ArrayBuffer, name: string, loop = false): Promise<void> {
+    return this.startMotion(bytes,name,loop,'user');
+  }
+  private async startMotion(bytes: ArrayBuffer,name: string,loop: boolean,kind: 'natural'|'user'): Promise<void> {
+    const sequence = ++this.motionSequence;
+    const vrm=this.vrm;
+    if (!vrm || this.disposed) throw new Error('请先载入角色。');
+    if (!this.motionPlayer) { const { MotionPlayer } = await import('./MotionPlayer'); if(sequence !== this.motionSequence || this.vrm!==vrm || this.disposed) return; this.motionPlayer ||= new MotionPlayer(vrm); }
+    this.motionKind=kind;
+    await this.motionPlayer.play(bytes, name, loop);
+    if (sequence !== this.motionSequence || this.vrm !== vrm || this.disposed) return;
+    this.noteActivity();
+  }
+  stopMotion(): void { ++this.motionSequence; this.motionPlayer?.stop(); this.motionKind=null; this.idleResumeAt=performance.now()+3000; }
+  get motionPlaying(): boolean { return this.motionPlayer?.playing ?? false; }
+  get canPlayLibraryMotion(): boolean { return Boolean(this.animator?.canUseIdleAnimation && (this.motionKind==='natural' || !this.motionPlaying)); }
+  setVoiceMouth(value: number): void { this.voiceMouth = Number.isFinite(value) ? clamp(value, 0, 1) : 0; }
+  captureImage(): string {
+    this.renderer.render(this.scene, this.camera);
+    return this.canvas.toDataURL('image/png');
+  }
   private readonly canvas: HTMLCanvasElement;
   private readonly bootstrap: BootstrapData;
   private readonly callbacks: RuntimeCallbacks;
@@ -81,6 +121,8 @@ export class AvatarRuntime {
   private readonly interactiveMeshes: THREE.Object3D[] = [];
   private vrm: VRM | null = null;
   private animator: ProceduralAnimator | null = null;
+  private desktopContactPose: DesktopContactPose | null = null;
+  private pointerDragging = false;
   private garmentContact: GarmentContactSolver | null = null;
   private pmxPhysics: PmxPhysics | null = null;
   private pmxPhysicsFailure = '';
@@ -205,6 +247,11 @@ export class AvatarRuntime {
       if (shouldCombineSkeletons(this.bootstrap.character.motionProfile)) {
         VRMUtils.combineSkeletons(vrm.scene);
       }
+      const damagedSkins = new Set<THREE.SkinnedMesh>();
+      const seamRepairs = repairPmxSkinSeams(vrm.scene, this.bootstrap.character.motionProfile, mesh => damagedSkins.add(mesh));
+      if (seamRepairs.vertices) console.info('Repaired split PMX skin seams', seamRepairs);
+      const gradientRepairs = repairPmxSkinGradients(vrm, this.bootstrap.character.motionProfile, damagedSkins);
+      if (gradientRepairs.vertices) console.info('Repaired PMX upper-body skin gradients', gradientRepairs);
       this.vrm = vrm;
       detachedScene = null; // The runtime now owns this model, including failure cleanup.
       this.prepareModel(vrm);
@@ -220,6 +267,11 @@ export class AvatarRuntime {
         }
         if (!current()) return;
       }
+
+      this.automaticContactReport = configureMissingSpringContacts(vrm, this.bootstrap.character.motionProfile, !!this.pmxPhysics,
+        this.bootstrap.character.contactConfiguration);
+      const armContacts = connectAuthoredArmContacts(vrm, this.bootstrap.character.motionProfile, !!this.pmxPhysics);
+      if (armContacts.joints) console.info('Connected authored arm contacts', armContacts);
 
       // Converted PMX garments with identifiable body/cloth meshes receive a
       // local triangle-contact pass. Built-in Yachiyo and direct VRM assets
@@ -345,12 +397,15 @@ export class AvatarRuntime {
     if (!this.bootstrap.smokeTest || !this.vrm) return;
     this.diagnosticBindPose = active;
     if (active) {
+      ++this.motionSequence;
+      this.motionPlayer?.stop(true);this.motionKind=null;
       this.vrm.humanoid.resetNormalizedPose();
       this.vrm.springBoneManager?.reset();
     }
   }
 
   setSettings(settings: AppSettings): void {
+    if(this.motionKind==='natural' && !settings.naturalIdle)this.stopMotion();
     const qualityChanged = settings.quality !== this.settings.quality;
     const physicsChanged = settings.physics !== this.settings.physics;
     const adaptiveChanged = settings.adaptivePerformance !== this.settings.adaptivePerformance;
@@ -385,11 +440,23 @@ export class AvatarRuntime {
   }
 
   triggerReaction(name: ReactionName): void {
+    this.stopMotion();
     this.autonomyFacing = 0;
     this.animator?.trigger(name);
   }
 
+  setDesktopContact(state: DesktopContactState): void {
+    if (!this.vrm) return;
+    if (state.phase !== 'idle') { this.stopMotion(); this.animator?.setAutonomousMotion('idle',1); }
+    this.animator?.setDragging(this.pointerDragging || state.phase === 'fall');
+    this.desktopContactPose ??= new DesktopContactPose(this.vrm,this.camera,this.canvas);
+    this.desktopContactPose.set(state);
+  }
+
+  desktopContactSnapshot(): Record<string, unknown> | null { return this.desktopContactPose ? {...this.desktopContactPose.diagnostics} : null; }
+
   setAutonomy(command: AutonomyCommand): void {
+    if (command.action === 'walk') this.stopMotion();
     const direction = command.direction === -1 ? -1 : 1;
     // A desktop walk travels horizontally while the camera looks at the
     // avatar. A shallow turn keeps the face almost front-facing while the
@@ -400,11 +467,17 @@ export class AvatarRuntime {
   }
 
   setDragging(active: boolean): void {
+    this.pointerDragging = active;
+    if (active) this.stopMotion();
     this.autonomyFacing = 0;
     this.animator?.setDragging(active);
   }
 
   resetPose(): void {
+    this.desktopContactPose?.set({phase:'idle'});
+    ++this.motionSequence;
+    this.motionPlayer?.stop(true);
+    this.motionKind=null;this.idleResumeAt=performance.now()+3000;
     this.targetRotationY = 0;
     this.currentRotationY = 0;
     this.avatarPivot.rotation.y = 0;
@@ -496,7 +569,7 @@ export class AvatarRuntime {
     if (!this.vrm) return { left: 0, right: canvasWidth, canvasWidth };
     if (this.usesRenderedFootprint() && this.renderedFootprint
       && this.renderedFootprint.canvasWidth === canvasWidth
-      && this.footprintZoom === this.settings.zoom) return this.renderedFootprint;
+      && this.footprintZoom === this.settings.zoom) return { ...this.renderedFootprint, ...this.desktopContactGeometry() };
 
     // Project the neutral mesh footprint for the current user rotation plus
     // either walking direction. This deliberately does not refit the camera or
@@ -529,7 +602,25 @@ export class AvatarRuntime {
       left: Math.floor(canvasWidth * 0.5 - extent),
       right: Math.ceil(canvasWidth * 0.5 + extent),
       canvasWidth,
+      ...this.desktopContactGeometry(),
     };
+  }
+
+  private desktopContactGeometry(): Partial<AvatarViewportBounds> {
+    const height = Math.max(1,this.canvas.clientHeight || window.innerHeight);
+    const width = Math.max(1,this.canvas.clientWidth || window.innerWidth);
+    const project = (point: THREE.Vector3): THREE.Vector2 => {
+      point.project(this.camera); return new THREE.Vector2((point.x*.5+.5)*width,(-point.y*.5+.5)*height);
+    };
+    const floor = project(new THREE.Vector3(0,0,0));
+    const top = project(new THREE.Vector3(0,this.modelHeight,0));
+    const feet = ['leftFoot','rightFoot','leftToes','rightToes'].flatMap(name => {
+      const bone = this.vrm?.humanoid.getRawBoneNode(name as VRMHumanBoneName);
+      return bone ? [project(bone.getWorldPosition(new THREE.Vector3())).x] : [];
+    });
+    const soleGuard = Math.max(2,Math.abs(floor.y-top.y)*.018);
+    return { canvasHeight:height,footY:floor.y,footLeft:Math.max(0,Math.min(...feet,width*.5)-soleGuard),
+      footRight:Math.min(width,Math.max(...feet,width*.5)+soleGuard),avatarHeight:Math.abs(floor.y-top.y) };
   }
 
   resize(): void {
@@ -542,6 +633,9 @@ export class AvatarRuntime {
   }
 
   dispose(): void {
+    ++this.motionSequence;
+    this.naturalIdleBytes=null;
+    this.motionPlayer?.dispose(); this.motionPlayer = null;
     if (this.disposed) return;
     this.disposed = true;
     this.loadSequence++;
@@ -563,6 +657,7 @@ export class AvatarRuntime {
     const vrm = this.vrm;
     this.vrm = null;
     this.animator = null;
+    this.desktopContactPose = null;
     this.interactiveMeshes.length = 0;
     this.interactionBoundsFrame = -1;
     this.tunedSpringJointCount = 0;
@@ -748,13 +843,25 @@ export class AvatarRuntime {
       : clamp(frameDuration / 1000, 1 / 240, 0.05);
     this.previousTimestamp = timestamp;
     this.lastRenderedTimestamp = timestamp;
-    if (frameDuration > 0 && frameDuration < 250) {
+    if (Number.isFinite(frameDuration) && frameDuration > 0) {
       this.frameDurations.push(frameDuration);
       if (this.frameDurations.length > 600) this.frameDurations.splice(0, this.frameDurations.length - 600);
     }
     this.renderedFrameCount += 1;
     this.pmxPhysics?.beforePose();
     if (!this.diagnosticBindPose) this.animator.update(delta);
+    this.updateNaturalIdle(timestamp);
+    this.motionPlayer?.update(delta);
+    if(this.motionPlayer?.playing) this.animator.constrainExternalPose();
+    if (this.desktopContactPose?.active) {
+      this.desktopContactPose.update(delta);
+      this.animator.constrainExternalPose();
+    }
+    if (this.voiceMouth > 0) {
+      const manager = this.vrm.expressionManager;
+      const name = manager?.getExpression('aa') ? 'aa' : manager?.getExpression('a') ? 'a' : null;
+      if (name) manager?.setValue(name, this.voiceMouth);
+    }
     this.currentRotationY = damp(this.currentRotationY, this.targetRotationY + this.autonomyFacing, 8.5, delta);
     this.avatarPivot.rotation.y = this.currentRotationY;
     this.updateVrm(delta);
@@ -765,6 +872,15 @@ export class AvatarRuntime {
     this.renderer.render(this.scene, this.camera);
     this.callbacks.onFrame?.();
     this.assessAdaptivePerformance(timestamp);
+  }
+
+  private updateNaturalIdle(timestamp: number): void {
+    const available=!this.desktopContactPose?.active && this.settings.naturalIdle && this.bootstrap.character.motionProfile.profileId==='generic-vrm'
+      && !this.diagnosticBindPose && this.animator?.canUseIdleAnimation;
+    if(this.motionKind==='natural' && !available){++this.motionSequence;this.motionPlayer?.stop();this.motionKind=null;this.idleResumeAt=timestamp+500;}
+    if(!available || !this.naturalIdleBytes || this.naturalIdleFailed || this.naturalIdlePending || this.motionPlaying || timestamp<this.idleResumeAt)return;
+    this.naturalIdlePending=true;
+    void this.startMotion(this.naturalIdleBytes,'AIRI 自然待机',true,'natural').catch(error=>{this.naturalIdleFailed=true;console.warn('Natural idle unavailable; retaining procedural idle.',error);}).finally(()=>{this.naturalIdlePending=false;});
   }
 
   private usesRenderedFootprint(): boolean {
@@ -804,7 +920,7 @@ export class AvatarRuntime {
       this.renderedFootprint = next;
       this.footprintZoom = zoom;
       if (this.started && (previous?.left !== next.left || previous?.right !== next.right
-        || previous?.canvasWidth !== next.canvasWidth)) this.callbacks.onViewportBounds?.(next);
+        || previous?.canvasWidth !== next.canvasWidth)) this.callbacks.onViewportBounds?.(this.avatarViewportBounds());
     } catch (error) {
       if (!this.disposed) {
         this.footprintFailed = true;
@@ -832,6 +948,7 @@ export class AvatarRuntime {
         this.pmxPhysics.beforePose();
         this.pmxPhysics.dispose(); this.pmxPhysics = null;
         this.animator?.setOriginalPmxPhysics(false);
+        connectAuthoredArmContacts(this.vrm, this.bootstrap.character.motionProfile, false);
         this.vrm.humanoid.update(); this.vrm.springBoneManager?.reset();
         this.garmentContact = GarmentContactSolver.create(this.vrm, this.bootstrap.character.motionProfile);
         if (this.garmentContact) for (const { display } of this.garmentContact.replacements) this.interactiveMeshes.push(display);

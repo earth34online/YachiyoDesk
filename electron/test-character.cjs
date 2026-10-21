@@ -20,6 +20,7 @@ function readTestCharacterMetadata(modelPath, environment = process.env) {
     throw new Error('PMX 测试角色必须保留 pmx-converted capability。');
   }
   return { sourceFormat: format, motionProfile: profile, sourceSha256: manifest.sourceSha256,
+    physicsAssociation: manifest.physicsAssociation, contactConfiguration: manifest.contactConfiguration,
     behavior: manifest.behavior, fixtureManifest: manifestPath };
 }
 module.exports = { readTestCharacterMetadata };

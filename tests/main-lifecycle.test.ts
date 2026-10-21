@@ -52,6 +52,14 @@ function harness(activeId = 'alpha', argv: string[] = []) {
 }
 
 describe('actual main-process character lifecycle', () => {
+  it('restores an explicit snapshot scale map exactly while normal zoom edits remember the active character',()=>{
+    const {handles,store}=harness();
+    const update=handles.get('settings:update')!;
+    update({}, {zoom:.8});expect(store.get().characterZooms).toEqual({yachiyo:.35,alpha:.8});
+    update({}, {zoom:.6,characterZooms:{yachiyo:.42}});
+    expect(store.get()).toMatchObject({zoom:.6,characterZooms:{yachiyo:.42}});
+    expect(Object.keys(store.get().characterZooms)).toEqual(['yachiyo']);
+  });
   it('keeps a visual review from changing normal Windows login startup', () => {
     const review=harness('alpha',['--visual-review']); review.electron.app.isPackaged=true;
     review.h.applyAutoStart(true);

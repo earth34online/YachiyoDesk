@@ -19,6 +19,8 @@ interface Binding {
   sourceBindInverse: THREE.Matrix4;
   poseSource: THREE.Bone;
   poseBindInverse: THREE.Matrix4;
+  sourceScale: THREE.Vector3;
+  motionOwned: boolean;
 }
 const point = new THREE.Vector3();
 const depth = (node: THREE.Object3D): number => node.parent ? depth(node.parent) + 1 : 0;
@@ -131,7 +133,8 @@ export class PmxPoseBinding {
       const error = point.setFromMatrixPosition(bind.get(node)!).distanceTo(target);
       if (error > tolerance) continue;
       const record: Binding = { native: bone, source: node, nativeRest: bone.matrixWorld.clone(), nativeRestInverse: bone.matrixWorld.clone().invert(),
-        sourceBind: bind.get(node)!, sourceBindInverse: bind.get(node)!.clone().invert(), poseSource: node, poseBindInverse: bind.get(node)!.clone().invert() };
+        sourceBind: bind.get(node)!, sourceBindInverse: bind.get(node)!.clone().invert(), poseSource: node, poseBindInverse: bind.get(node)!.clone().invert(),
+        sourceScale: node.scale.clone(), motionOwned: false };
       this.bindings.push(record); this.nativeBindings.set(bone, record); this.sourceBindings.set(node, record); used.add(node);
       this.diagnostics.maximumBindError = Math.max(this.diagnostics.maximumBindError, error);
     }
@@ -141,7 +144,17 @@ export class PmxPoseBinding {
       throw new Error(`PMX 存在无法对应的蒙皮骨骼：${missing.slice(0, 6).map(index => mmd.mesh.skeleton.bones[index]?.name).join('、')}`);
     }
     const human = new Set(Object.values(vrm.humanoid.rawHumanBones).map(bone => bone!.node));
+    const dynamic = new Set<THREE.Bone>();
+    for (const body of mmd.pmx.rigidBodies) {
+      if (body.physicsMode === 0) continue;
+      const bone = body.boneIndex >= 0 ? mmd.mesh.skeleton.bones[body.boneIndex] : nativeByName.get(body.name);
+      if (bone) dynamic.add(bone);
+    }
     for (const record of this.bindings) {
+      // Kinematic humanoid bones are inputs to physics. Feeding their rounded
+      // matrix decomposition back into the next pose accumulates scale and
+      // translation error, visibly enlarging one sleeve during long sessions.
+      record.motionOwned = human.has(record.source) && !dynamic.has(record.native);
       if (!human.has(record.source)) continue;
       const index = mmd.mesh.skeleton.bones.indexOf(record.native);
       const append = mmd.pmx.bones[index].appendTransform;
@@ -176,6 +189,10 @@ export class PmxPoseBinding {
           .multiply(record.poseBindInverse).multiply(this.nativeToReference).multiply(record.nativeRest);
         this.b.copy(transform.node.parent!.matrixWorld).invert().multiply(this.a);
         this.b.decompose(transform.node.position, transform.node.quaternion, transform.node.scale);
+        transform.node.quaternion.normalize();
+        // Bullet simulates rigid transforms; a decomposed scale is not a
+        // physical result. Keep the original native rig's authored scale.
+        transform.node.scale.copy(transform.scale);
         transform.node.updateMatrix();
       }
       transform.node.updateWorldMatrix(false, false);
@@ -188,12 +205,14 @@ export class PmxPoseBinding {
     // parent's matrix is current before deriving a child's local transform.
     for (const node of this.sourceOrder) {
       const record = this.sourceBindings.get(node);
-      if (record) {
+      if (record && !record.motionOwned) {
         this.a.copy(this.referenceToWorld).multiply(this.nativeToReference).multiply(record.native.matrixWorld)
           .multiply(record.nativeRestInverse).multiply(this.referenceToNative).multiply(record.sourceBind);
         this.b.copy(node.parent!.matrixWorld).invert().multiply(this.a);
         if (!this.b.elements.every(Number.isFinite)) throw new Error('PMX 物理产生了非有限骨骼变换');
         this.b.decompose(node.position, node.quaternion, node.scale);
+        node.quaternion.normalize();
+        node.scale.copy(record.sourceScale);
         node.updateMatrix();
       }
       node.updateWorldMatrix(false, false);

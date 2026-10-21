@@ -41,7 +41,7 @@ function rig(front: number, scale: number, generic = true) {
   const vrm = { scene, humanoid } as VRM;
   const profile = sanitizeMotionProfile(PMX_CONVERTED_MOTION_PROFILE);
   const animator = new ProceduralAnimator(vrm, { ...DEFAULT_SETTINGS, idleMotion: false, mouseLook: false, lookIntensity: 0 },
-    generic ? profile : { ...profile, capabilities: [] });
+    generic ? profile : { ...profile, profileId:'yachiyo', capabilities: [] });
   const point = (name: string) => bones[name].getWorldPosition(new THREE.Vector3());
   const rest = Object.fromEntries(Object.keys(bones).map(name => [name, point(name)]));
   const step = (n: number) => { for (let i = 0; i < n; i++) { animator.update(1 / 60); humanoid.update(); scene.updateWorldMatrix(true, true); } };
@@ -49,15 +49,33 @@ function rig(front: number, scale: number, generic = true) {
 }
 
 describe('generic geometry constraints', () => {
+  it('fits retargeted resting arms to measured garment volume while preserving lengths and world palm orientation',()=>{
+    for(const front of [-1,1])for(const scale of [.7,1.8]){
+      const r=rig(front,scale),constraints=GenericPoseConstraints.create(r.vrm,r.profile)!;
+      for(const [side,sign] of [['left',1],['right',-1]] as const){
+        r.humanoid.getNormalizedBoneNode(`${side}UpperArm`)!.quaternion.setFromAxisAngle(new THREE.Vector3(0,0,1),-sign*Math.PI/2);
+        r.humanoid.getNormalizedBoneNode(`${side}Hand`)!.quaternion.setFromAxisAngle(new THREE.Vector3(1,0,0),.3);
+      }
+      r.humanoid.normalizedHumanBonesRoot.updateWorldMatrix(true,true);
+      const point=(name:string)=>r.humanoid.getNormalizedBoneNode(name as any)!.getWorldPosition(new THREE.Vector3());
+      const before=point('leftHand'),upper=point('leftUpperArm').distanceTo(point('leftLowerArm')),lower=point('leftLowerArm').distanceTo(point('leftHand'));
+      const orientation=r.humanoid.getNormalizedBoneNode('leftHand')!.getWorldQuaternion(new THREE.Quaternion());
+      constraints.constrainExternalArms({leftRadius:.42*scale,rightRadius:.42*scale,frontDepth:.3*scale,backDepth:.3*scale,height:1.55*scale});
+      expect(point('leftHand').x-before.x).toBeGreaterThan(.1*scale);
+      expect(point('leftUpperArm').distanceTo(point('leftLowerArm'))).toBeCloseTo(upper,6);
+      expect(point('leftLowerArm').distanceTo(point('leftHand'))).toBeCloseTo(lower,6);
+      expect(r.humanoid.getNormalizedBoneNode('leftHand')!.getWorldQuaternion(new THREE.Quaternion()).angleTo(orientation)).toBeLessThan(1e-6);
+    }
+  });
   for (const front of [-1, 1]) {
-    it(`moves both resting hands slightly forward using the rig's front direction ${front}`, () => {
-      const adjusted = rig(front, 1), original = rig(front, 1, false);
-      adjusted.step(1); original.step(1);
+    it(`hangs resting arms beside the torso with a soft elbow and forward hands, front ${front}`, () => {
+      const adjusted = rig(front, 1);
+      adjusted.step(1);
       for (const side of ['left', 'right']) {
-        const delta = adjusted.point(side + 'Hand').sub(original.point(side + 'Hand'));
-        expect(delta.z * front).toBeGreaterThan(.01);
-        expect(delta.length()).toBeLessThan(.06);
-        expect(Math.abs(delta.x)).toBeLessThan(.002);
+        const arm = adjusted.point(side+'Hand').sub(adjusted.point(side+'UpperArm'));
+        expect(arm.z*front).toBeGreaterThan(.01);
+        expect(arm.angleTo(new THREE.Vector3(0,-1,0))).toBeLessThan(THREE.MathUtils.degToRad(12));
+        expect(arm.length()).toBeGreaterThan(.44);
       }
     });
   }
@@ -104,9 +122,9 @@ describe('generic geometry constraints', () => {
       expect(r.point(side + 'IndexDistal').y).toBeLessThan(r.rest[side + 'IndexDistal'].y - .03);
     }
   });
-  it('leaves native VRM and the Yachiyo profile outside the new constraint path', () => {
+  it('uses the shared geometry contract for native VRM and keeps the Yachiyo profile separate', () => {
     const r = rig(1, 1);
-    expect(GenericPoseConstraints.create(r.vrm, { ...r.profile, capabilities: [] })).toBeNull();
+    expect(GenericPoseConstraints.create(r.vrm, { ...r.profile, capabilities: [] })).not.toBeNull();
     expect(GenericPoseConstraints.create(r.vrm, { ...r.profile, profileId: 'yachiyo' })).toBeNull();
   });
   it('opposes and flexes both thumbs toward the palm instead of twisting their length axes', () => {

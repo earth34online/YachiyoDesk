@@ -1,0 +1,5 @@
+interface:
+  display_name: "角色导入修复"
+  short_description: "在副本中分析 VRM 和 PMX 导入错误并提出可验证的修复方案"
+policy:
+  allow_implicit_invocation: false

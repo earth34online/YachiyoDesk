@@ -4,7 +4,8 @@ import { FRONT_PALM_TWIST_RADIANS, viewerFacingPalmTwists } from './handPose';
 import { ExpressionController } from './ExpressionController';
 import { legGait } from './gait';
 import { GenericPoseConstraints } from './genericPoseConstraints';
-import { skirtGaitScale, skirtLateralGaitScale, skirtRestArmAngle, skirtHandClearanceAngle } from './garmentPose';
+import { JointDynamics } from './jointDynamics';
+import { skirtGaitScale, skirtLateralGaitScale, skirtRestArmAngle } from './garmentPose';
 import { clamp, damp, randomBetween, reactionEnvelope, smoothstep01 } from './math';
 import type { AppSettings, AutonomousMotion, MotionProfile, ReactionName } from './types';
 
@@ -128,6 +129,7 @@ export class ProceduralAnimator {
   private settings: AppSettings;
   private readonly motionProfile: MotionProfile;
   private readonly genericConstraints: GenericPoseConstraints | null;
+  private readonly jointDynamics = new JointDynamics();
   private readonly skirtRestAngles: { left: number; right: number; leftRadius: number; rightRadius: number; frontDepth: number; backDepth: number; gaitScale: number; lateralGaitScale: number; height: number } | null;
   private elapsed = 0;
   private sleepWeight = 0;
@@ -169,6 +171,10 @@ export class ProceduralAnimator {
   setSettings(settings: AppSettings): void {
     this.settings = settings;
   }
+  get canUseIdleAnimation(): boolean {
+    return this.settings.idleMotion && !this.reaction && !this.dragging && this.autonomousMotion==='idle'
+      && this.walkWeight<.01 && this.draggingWeight<.01 && this.sleepWeight<.01;
+  }
 
   setOriginalPmxPhysics(active: boolean): void {
     this.originalPmxPhysics = active && this.motionProfile.profileId === 'generic-vrm'
@@ -183,6 +189,8 @@ export class ProceduralAnimator {
   getAnatomyDiagnostics(): Record<string, unknown> | null {
     return this.genericConstraints ? { ...this.genericConstraints.diagnostics, ...this.genericConstraints.measure() } : null;
   }
+
+  constrainExternalPose(): void { this.genericConstraints?.constrainExternalArms(this.skirtRestAngles); }
 
   sampleFingerFlexion(): Array<Record<string, unknown>> {
     if (!this.genericConstraints) return [];
@@ -252,11 +260,12 @@ export class ProceduralAnimator {
   }
 
   private beginPoseTransition(): void {
-    this.transitionPose = clonePose(this.pose);
+    this.transitionPose = clonePose(this.genericConstraints ? this.vrm.humanoid.getNormalizedPose() as NormalizedPose : this.pose);
     this.transitionStartedAt = this.elapsed;
   }
 
   reset(): void {
+    this.jointDynamics.reset();
     this.reaction = null;
     this.transitionPose = null;
     this.autonomousMotion = 'idle';
@@ -316,6 +325,7 @@ export class ProceduralAnimator {
     const reactionName = activeReaction?.name ?? null;
     this.updatePose(this.sleepWeight, reactionName, reactionWeight, reactionElapsed, activeReaction?.duration ?? 1);
     this.applyPoseTransition();
+    if(this.genericConstraints)this.jointDynamics.apply(this.pose,delta);
     const progress = reactionElapsed / (activeReaction?.duration ?? 1);
     const constraintWeight = reactionName === 'crouch' ? windowPulse(progress, .02, .24, .72, .98)
       : reactionName === 'tiptoe' ? windowPulse(progress, .02, .22, .76, .98)
@@ -324,6 +334,7 @@ export class ProceduralAnimator {
       ? smoothstep01(clamp((this.elapsed - this.transitionStartedAt) / this.transitionDuration, 0, 1)) : 1;
     this.genericConstraints?.apply(this.pose, reactionName, constraintWeight * reactionWeight, constraintBlend);
     this.vrm.humanoid.setNormalizedPose(this.pose);
+    this.genericConstraints?.constrainExternalArms(this.skirtRestAngles);
 
     if (this.vrm.lookAt) {
       this.vrm.lookAt.yaw = this.lookCurrent.x * 10 * this.settings.lookIntensity;
@@ -439,10 +450,10 @@ export class ProceduralAnimator {
     let leftArmY = 0.025;
     // Use the final garment-aware rest pose throughout gesture fade-out. A
     // late idle-only override made the arm visit 1.16 first, then jump to rest.
-    let leftArmZ = this.skirtRestAngles?.left ?? (1.16 + weightShift * 0.7);
+    let leftArmZ = this.genericConstraints ? this.genericConstraints.idleArmAngle('left') + weightShift*.7 : this.skirtRestAngles?.left ?? (1.16 + weightShift * 0.7);
     let rightArmX = idleArmPitch;
     let rightArmY = -0.025;
-    let rightArmZ = this.skirtRestAngles ? -this.skirtRestAngles.right : -1.16 + weightShift * 0.7;
+    let rightArmZ = this.genericConstraints ? -this.genericConstraints.idleArmAngle('right') + weightShift*.7 : this.skirtRestAngles ? -this.skirtRestAngles.right : -1.16 + weightShift * 0.7;
     let leftLowerX = -0.14;
     let leftLowerY = 0.045;
     // Keep the relaxed elbow bend on the forward/back axis. Sideways Z bends
@@ -828,10 +839,8 @@ export class ProceduralAnimator {
       headY += (0.20 + ponder * 0.055) * active;
       headZ += 0.095 * active;
       rightShoulderZ += 0.035 * active;
-      // This avatar's wide sleeve makes a generic outward elbow bend read as
-      // another wave. Keep the upper arm nearer the torso and fold the forearm
-      // inward on its normalized bend axis so the visible hand reaches the
-      // temple/cheek line instead of stopping outside the hair.
+      // Define the gesture's intent here. GenericPoseConstraints retargets the
+      // hand to this rig's measured head surface and solves its actual arm reach.
       rightArmX = THREE.MathUtils.lerp(rightArmX, -0.08, active);
       rightArmZ = THREE.MathUtils.lerp(rightArmZ, -1.08, active);
       rightArmY = THREE.MathUtils.lerp(rightArmY, -0.04, active);
@@ -976,40 +985,6 @@ export class ProceduralAnimator {
     }
     if (leftRadius < 0.04 || rightRadius < 0.04) return null;
     const restAngles = { left: skirtRestArmAngle(leftRadius, height), right: skirtRestArmAngle(rightRadius, height) };
-    if (this.genericConstraints) {
-      // Spring-joint centers under-estimate the cloth surface and the hand's
-      // thickness. Measure the actual skirt at relaxed wrist height. Moving
-      // an intersecting hand a little outward avoids forcing fabric between
-      // the palm and thigh; the author's distinct rig retains its old pose.
-      for (const side of ['left', 'right'] as const) {
-        const shoulder = this.vrm.humanoid.getRawBoneNode(`${side}UpperArm` as VRMHumanBoneName);
-        const elbow = this.vrm.humanoid.getRawBoneNode(`${side}LowerArm` as VRMHumanBoneName);
-        const wrist = this.vrm.humanoid.getRawBoneNode(`${side}Hand` as VRMHumanBoneName);
-        if (!shoulder || !elbow || !wrist) continue;
-        const shoulderPoint = localPoint(shoulder), elbowPoint = localPoint(elbow), wristPoint = localPoint(wrist);
-        const armLength = shoulderPoint.distanceTo(elbowPoint) + elbowPoint.distanceTo(wristPoint);
-        const wristHeight = shoulderPoint.y - armLength * Math.sin(restAngles[side]);
-        let garmentRadius = 0;
-        this.vrm.scene.traverse(object => {
-          const mesh = object as THREE.SkinnedMesh;
-          if (!mesh.isSkinnedMesh) return;
-          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          if (!materials.some(material => /skirt|スカート|裙|dress/i.test(material.name))) return;
-          mesh.updateWorldMatrix(true, false);
-          for (let i = 0; i < mesh.geometry.attributes.position.count; i++) {
-            mesh.getVertexPosition(i, point); mesh.localToWorld(point); this.vrm.scene.worldToLocal(point);
-            if (Math.abs(point.y - wristHeight) > height * .03) continue;
-            if ((point.x - hipsPoint.x) * (shoulderPoint.x - hipsPoint.x) < 0) continue;
-            garmentRadius = Math.max(garmentRadius, Math.abs(point.x - hipsPoint.x));
-          }
-        });
-        const index = this.vrm.humanoid.getRawBoneNode(`${side}IndexProximal` as VRMHumanBoneName);
-        const little = this.vrm.humanoid.getRawBoneNode(`${side}LittleProximal` as VRMHumanBoneName);
-        const handRadius = index && little ? localPoint(index).distanceTo(localPoint(little)) * .5 : armLength * .04;
-        restAngles[side] = skirtHandClearanceAngle(restAngles[side], Math.abs(shoulderPoint.x - hipsPoint.x),
-          armLength, garmentRadius, handRadius + height * .006);
-      }
-    }
     return {
       left: restAngles.left,
       right: restAngles.right,

@@ -15,6 +15,8 @@ import type {
 declare global {
   interface Window {
     yachiyoDesk: {
+      companionRequest<T = unknown>(action: string, input?: unknown): Promise<{ ok: boolean; data: T; error?: string; code?: string; capability?: import('./companion-types').Capability }>;
+      onCompanionEvent(callback: (event: import('./companion-types').CompanionEvent) => void): () => void;
       getBootstrap(): Promise<BootstrapData>;
       updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
       flushInteractionSettings(patch: Partial<AppSettings>, characterId: string): boolean;

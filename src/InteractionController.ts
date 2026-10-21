@@ -80,7 +80,7 @@ export class InteractionController {
       // Pointer events cannot cross a BrowserWindow boundary. Closing on blur
       // covers clicks on another app/desktop as well as clicks inside our own
       // transparent surface, so the panel never depends on one event path.
-      if (this.ui.isSettingsOpen()) this.ui.hideSettings();
+      if (this.ui.isSettingsOpen() && !document.body.dataset.nativeDialog) this.ui.hideSettings();
     });
     window.addEventListener('keydown', (event) => this.onKeyDown(event));
   }
@@ -248,6 +248,8 @@ export class InteractionController {
   }
 
   private onKeyDown(event: KeyboardEvent): void {
+    if (document.querySelector('dialog[open]')) return;
+    if (event.target instanceof HTMLElement && event.target.closest('input,textarea,select,[contenteditable=true]')) return;
     if (event.key === 'Escape' && this.ui.isSettingsOpen()) {
       this.ui.hideSettings();
       return;

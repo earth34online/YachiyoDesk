@@ -73,7 +73,11 @@ function inspectVrmFile(filePath) {
     const meta = extension.meta;
     const displayName = meta.title || meta.name || path.parse(filePath).name;
     const creator = meta.author || (Array.isArray(meta.authors) ? meta.authors.join('、') : '') || '本地导入';
-    return { displayName: String(displayName).slice(0, 80), creator: String(creator).slice(0, 120) };
+    const convertedPmx = json.extras?.yachiyoDesk?.sourceFormat === 'pmx'
+      || (meta.copyrightInformation === 'Converted locally from the selected PMX source'
+        && Array.isArray(meta.authors) && meta.authors.includes('Local PMX conversion'));
+    return { displayName: String(displayName).slice(0, 80), creator: String(creator).slice(0, 120),
+      ...(convertedPmx ? { convertedPmx: true } : {}) };
   } finally {
     fs.closeSync(handle);
   }

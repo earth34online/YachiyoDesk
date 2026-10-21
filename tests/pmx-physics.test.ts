@@ -25,10 +25,48 @@ function fixture(duplicate = false, deform = false) {
   const human:any={hips:source.hips,head:source.head,leftUpperArm:source.leftUpperArm,rightUpperArm:source.rightUpperArm};
   if(deform)human.leftUpperLeg=source.bones[6];
   const vrm={scene:source.root,humanoid:{getRawBoneNode:(name:string)=>human[name],rawHumanBones:Object.fromEntries(Object.entries(human).map(([name,node])=>[name,{node}]))}} as unknown as VRM;
-  const mmd={mesh:native.mesh,pmx:{bones:native.bones.map((_,i)=>({appendTransform:deform&&i===6?{parentIndex:5,ratio:1}:undefined}))},beforeUpdate:vi.fn()} as unknown as MMD;
+  const mmd={mesh:native.mesh,pmx:{rigidBodies:[],bones:native.bones.map((_,i)=>({appendTransform:deform&&i===6?{parentIndex:5,ratio:1}:undefined}))},beforeUpdate:vi.fn()} as unknown as MMD;
   return{source,native,vrm,mmd,binding:new PmxPoseBinding(vrm,mmd)};
 }
 describe('original PMX physics bind-space contract',()=>{
+  it('never feeds numerical error back into motion-owned limbs over repeated physics frames',()=>{
+    const {source,native,binding}=fixture();
+    source.rightUpperArm.scale.set(1.05,.95,1.02);
+    const position=source.rightUpperArm.position.clone(),scale=source.rightUpperArm.scale.clone();
+    for(let frame=0;frame<3000;frame++){
+      source.rightUpperArm.rotation.set(.25*Math.sin(frame*.03),.1,-.4);
+      const rotation=source.rightUpperArm.quaternion.clone();source.root.updateMatrixWorld(true);
+      binding.toNative();
+      // A small per-frame decomposition error must remain bounded instead of
+      // becoming the input for the next frame's limb pose and skinning.
+      native.rightUpperArm.matrixWorld.elements[0]*=1.00001;
+      native.rightUpperArm.matrixWorld.elements[12]+=.00001;
+      binding.toVrm();
+      expect(source.rightUpperArm.position.equals(position)).toBe(true);
+      expect(source.rightUpperArm.scale.equals(scale)).toBe(true);
+      expect(source.rightUpperArm.quaternion.equals(rotation)).toBe(true);
+    }
+  });
+  it('transfers dynamic bone motion without transferring a spurious scale',()=>{
+    const {source,native,binding}=fixture();
+    binding.toNative();
+    native.skirt.rotation.x=.45;native.skirt.position.x+=.3;native.skirt.scale.set(1.0002,.9998,1.0001);
+    native.skirt.updateMatrix();native.root.updateMatrixWorld(true);binding.toVrm();
+    expect(source.skirt.scale.toArray()).toEqual([1,1,1]);
+    expect(source.skirt.position.x).toBeCloseTo(.03,7);
+    expect(source.skirt.rotation.x).toBeCloseTo(.45,4);
+    expect(source.skirt.quaternion.length()).toBeCloseTo(1,12);
+  });
+  it('still transfers a humanoid bone explicitly owned by a dynamic rigid body',()=>{
+    const {source,native,vrm,mmd}=fixture();
+    (mmd.pmx as any).rigidBodies=[{boneIndex:2,physicsMode:1,name:'leftUpperArm'}];
+    const binding=new PmxPoseBinding(vrm,mmd);binding.toNative();
+    native.leftUpperArm.rotation.z=.3;native.leftUpperArm.position.y-=.5;
+    native.leftUpperArm.updateMatrix();native.root.updateMatrixWorld(true);binding.toVrm();
+    expect(source.leftUpperArm.rotation.z).toBeCloseTo(.3,8);
+    expect(source.leftUpperArm.position.y).toBeCloseTo(.35,8);
+    expect(source.leftUpperArm.scale.toArray()).toEqual([1,1,1]);
+  });
   it('rejects corrupt physics input while allowing authored zero-volume anchors and reversed free limits',()=>{
     const pmx:any={bones:[{position:[0,0,0],parentBoneIndex:-1}],rigidBodies:[{
       name:'anchor',shapeSize:[0,0,0],shapePosition:[0,0,0],shapeRotation:[0,0,0],boneIndex:-1,

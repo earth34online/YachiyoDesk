@@ -1,22 +1,26 @@
-# YachiyoDesk 1.0.9 本机使用说明
+# YachiyoDesk 本机使用说明
 
-更新日期：2026-10-20。1.x 收官版，构建及验证状态见 [本轮记录](RELEASE_20261020.md)。
+更新日期：2026-10-21。当前开发版为 2.0.0-beta.1，新增功能操作见 [2.0 陪伴功能](COMPANION_2.0.md)，本轮动作与校服修复状态见 [审查记录](REVIEW_20261021.md)。历史交付记录保留，日常入口统一使用最新 2.0 程序。
 
 ## 启动
 
-双击桌面的 `YachiyoDesk - 八千代` 快捷方式，或直接运行：
+2.0 待审查程序直接运行：
 
 ```text
-F:\create\YachiyoDesk\release\win-unpacked\YachiyoDesk.exe
+F:\create\YachiyoDesk\release\2.0.0-beta.1\win-unpacked\YachiyoDesk.exe
 ```
 
 本机桌面构建保留原有八千代模型。公开发布构建使用同一套核心程序，首次启动通过角色库导入本地模型。
 
-公开版成品位于：
+2026-10-21 已将桌面“YachiyoDesk - 八千代”快捷方式和实际运行入口统一到上述程序，按包内容及进程路径核对；开机启动维持用户已有选择。旧程序删除被自动审批拒绝，文件暂留，但日常入口不再指向旧版。
+
+此前仅更新 UI 的阶段已结束，当前从统一共享源码构建。校服接缝、上袖边缘和思考手部避让随运行程序更新，不要求替换原模型。本机当前人物已完整验证源 PMX 的位置、UV 和绑定对应，并以新的双哈希记录关联原始物理；原 VRM 字节不变，角色资料修改前另存备份。来源不明的其他旧导入仍保留回退，不借用未核实物理。新导入的基础碰撞补全与 API 参数调整均在真实预览中检查。旧 Portable/Setup 未重建，不作为最新入口；当前包核验和实际进程见 [审查记录](REVIEW_20261021.md)。
+
+公开版现有便携版和安装包位于以下路径；2026-10-21 UI 收尾时重新封装遇到下载超时，因此这两份文件仍是此前构建，不包含本次 UI 精简。当前 UI 请使用上述桌面解包程序：
 
 ```text
-F:\create\YachiyoDesk-public\release\YachiyoDesk-1.0.9-x64-Portable.exe
-F:\create\YachiyoDesk-public\release\YachiyoDesk-1.0.9-x64-Setup.exe
+F:\create\YachiyoDesk-public\release\2.0.0-beta.1\YachiyoDesk-2.0.0-beta.1-x64-Portable.exe
+F:\create\YachiyoDesk-public\release\2.0.0-beta.1\YachiyoDesk-2.0.0-beta.1-x64-Setup.exe
 ```
 
 ## 常用操作
@@ -31,13 +35,13 @@ F:\create\YachiyoDesk-public\release\YachiyoDesk-1.0.9-x64-Setup.exe
 | Ctrl＋0 | 恢复默认朝向与 35% 显示比例 |
 | 托盘右键 | 显示角色、打开设置、角色库或数据目录 |
 
-设置面板提供常用参数、动作、陪伴、角色管理和性能信息。角色比例分别保存；专注计时和宠物状态也按本地配置持续保存。
+设置面板提供常用、聊天、动作、陪伴、角色、创作和性能页面。角色比例分别保存；专注计时和宠物状态也按本地配置持续保存。聊天使用你自己的 API，创作室的本地功能无需 AI。
 
 开启自主活动后，角色沿屏幕底部行走并穿插动作。点击、拖动或操作设置时会暂停行走；闲置 15 秒后恢复活动。开机启动、位置锁定、置顶、物理和鼠标穿透均可在设置中调整。
 
 ## 导入角色和数据
 
-在角色库中选择“导入 VRM”或“导入 PMX”，完成后点击角色卡上的“使用”。PMX 转换需要本机 Blender 及 MMD Tools、VRM format 扩展。
+在角色库中选择“导入 VRM”或“导入 PMX”，等待真实预览并确认后入库，再点击角色卡上的“使用”。导入失败时可明确选择用自己的 API 修复副本，或停止导入并更换来源。PMX 转换需要本机 Blender 及 MMD Tools、VRM format 扩展。
 
 本版导入通用 PMX 时会保留原始刚体与关节所需的数据。旧导入若提示缺少原始物理数据，请从完整原始目录重新导入 PMX；模型和贴图留在本机。八千代继续使用已有专用配置。
 
@@ -47,4 +51,10 @@ F:\create\YachiyoDesk-public\release\YachiyoDesk-1.0.9-x64-Setup.exe
 
 本机项目的 `docs` 目录保存当前安装指南、架构、需求、维护规则和版本说明。公开源码位于 `F:\create\YachiyoDesk-public`，桌面构建位于 `F:\create\YachiyoDesk`；共享内容通过 `npm run sync:local` 同步。
 
-本轮诊断与画面证据保存在 `F:\create\YachiyoDesk-public\artifacts\airi-review-20261020`，历史 1.0.8 交付证据保留在 `artifacts\release-final-20261006`。
+2.0 诊断与画面证据保存在 `F:\create\YachiyoDesk-public\artifacts\2.0-development-20261020`，历史证据按原目录保留。
+
+## 2026-10-21 桌面接触功能
+
+设置 → 通用 → 动作与更多设置，启用“桌面接触动作”和“站在窗口边缘”。将角色拖到可见应用顶边上方松手即可落脚；站在窗口时跟随平移，窗口关闭、最小化或顶边被遮挡后下落。锁定位置时不移动；关闭窗口接触仍可使用桌面落地。最新桌面入口继续使用 release/2.0.0-beta.1/win-unpacked/YachiyoDesk.exe。
+
+详见 [桌面接触功能与验收](DESKTOP_CONTACTS_20261021.md)。

@@ -10,9 +10,11 @@ import type {
   RuntimePerformanceStats,
 } from './types';
 
-export type SettingsPage = 'general' | 'actions' | 'focus' | 'characters' | 'performance';
+export type SettingsPage = 'general' | 'actions' | 'focus' | 'characters' | 'performance' | 'chat' | 'studio';
 
 interface UiCallbacks {
+  onImportResult?: (result: import('./types').CharacterImportResult) => Promise<boolean>;
+  renderExtension?: (page: 'chat' | 'studio', container: HTMLElement) => void;
   onSettingsPatch: (patch: Partial<AppSettings>) => void;
   onSettingsPreview: (patch: Partial<AppSettings>) => void;
   onCloseSettings: () => void;
@@ -29,10 +31,12 @@ interface ToggleDefinition {
 }
 
 const GENERAL_TOGGLES: ToggleDefinition[] = [
-  { key: 'mouseLook', label: '鼠标视线跟随', description: '眼睛与头部平滑追踪鼠标。' },
-  { key: 'physics', label: '头发与衣物物理', description: '启用 VRM 摇摆骨骼与碰撞体。' },
+  { key: 'mouseLook', label: '视线跟随', description: '眼睛与头部平滑追踪鼠标。' },
+  { key: 'physics', label: '物理效果', description: '启用头发与衣物物理。' },
   { key: 'idleMotion', label: '呼吸与待机动作', description: '呼吸、重心变化与随机观察。' },
-  { key: 'autonomousBehavior', label: '屏幕底部自主活动', description: '无操作时散步、观察、伸懒腰与跳舞；触碰立即停止。' },
+  { key: 'autonomousBehavior', label: '自主活动', description: '无操作时散步、观察、伸懒腰与跳舞；触碰立即停止。' },
+  { key: 'desktopContacts', label: '桌面接触动作', description: '拖放后自然落地，走到屏幕边缘时停步转身。' },
+  { key: 'windowContacts', label: '站在窗口边缘', description: '可落在可见应用窗口顶边；只在本机读取窗口边界。' },
   { key: 'reactions', label: '点击反应', description: '摸头、戳身体及连续点击反馈。' },
   { key: 'speech', label: '对白气泡', description: '互动时显示角色本地对白。' },
   { key: 'contactShadow', label: '脚下柔和阴影', description: '增强角色站在桌面的空间感。' },
@@ -66,9 +70,9 @@ const ACTIONS: Array<{ reaction: ReactionName; icon: string; label: string; desc
 ];
 
 const QUALITY_LABELS: Record<QualityMode, string> = {
-  ultra: '极致 · 最高画质',
-  high: '高 · 较低显存占用',
-  balanced: '均衡 · 低功耗 30 FPS',
+  ultra: '极致',
+  high: '高画质',
+  balanced: '节能 · 30 FPS',
 };
 
 export class AppUI {
@@ -182,6 +186,14 @@ export class AppUI {
     this.speechTimer = window.setTimeout(() => this.speech.classList.remove('is-visible'), duration);
   }
 
+  showTextSpeech(text: string): void {
+    if (!this.settings.speech || document.body.classList.contains('test-hide-overlays')) return;
+    this.speech.textContent = text.slice(0, 240);
+    this.speech.classList.add('is-visible');
+    window.clearTimeout(this.speechTimer);
+    this.speechTimer = window.setTimeout(() => this.speech.classList.remove('is-visible'), 6500);
+  }
+
   positionSpeech(position: { x: number; y: number } | null): void {
     if (!position) return;
     const x = Math.max(88, Math.min(window.innerWidth - 88, position.x));
@@ -245,7 +257,7 @@ export class AppUI {
   }
 
   isBlockingOverlayOpen(): boolean {
-    return this.blockingOverlayOpen;
+    return this.blockingOverlayOpen || Boolean(document.querySelector('dialog[open]'));
   }
 
   isCompanionDockTarget(target: EventTarget | null): boolean {
@@ -379,6 +391,7 @@ export class AppUI {
     if (this.activePage === 'focus') this.renderFocus(page);
     if (this.activePage === 'characters') this.renderCharacters(page);
     if (this.activePage === 'performance') this.renderPerformance(page);
+    if (this.activePage === 'chat' || this.activePage === 'studio') this.callbacks.renderExtension?.(this.activePage, page);
     this.settingsContent.append(page);
   }
 
@@ -387,15 +400,18 @@ export class AppUI {
     tabs.className = 'control-tabs';
     const definitions: Array<[SettingsPage, string, string]> = [
       ['general', '常用', '⌁'],
+      ['chat', '聊天', '♡'],
       ['actions', '动作', '✦'],
       ['focus', '陪伴', '◷'],
       ['characters', '角色', '◇'],
+      ['studio', '创作', '▧'],
       ['performance', '性能', '▥'],
     ];
     for (const [page, label, icon] of definitions) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = `control-tab${this.activePage === page ? ' is-active' : ''}`;
+      button.dataset.page = page;
       button.innerHTML = `<i>${icon}</i><span>${label}</span>`;
       button.addEventListener('click', () => {
         this.activePage = page;
@@ -424,49 +440,59 @@ export class AppUI {
       '朝向角度', '左右调整角色朝向。', this.settings.rotationY * 180 / Math.PI, -75, 75, 1,
       (value) => `${Math.round(value)}°`, (value) => ({ rotationY: value * Math.PI / 180 }),
     ));
-    container.append(this.createRangeSetting(
+    const advanced = document.createElement('details');
+    advanced.className = 'workspace-card advanced-settings';
+    const advancedTitle = document.createElement('summary');
+    advancedTitle.textContent = '动作与更多设置';
+    advanced.append(advancedTitle);
+    advanced.append(this.createRangeSetting(
       '动作幅度', '调节呼吸、待机与反应动作的整体强度。', this.settings.motionIntensity, 0, 1.5, 0.05,
       (value) => `${Math.round(value * 100)}%`, (value) => ({ motionIntensity: value }),
     ));
-    container.append(this.createRangeSetting(
-      '散步速度', '控制无操作时沿屏幕底部移动的速度；角色配置可在此基础上做独立倍率。', this.settings.wanderSpeed, 18, 90, 1,
+    advanced.append(this.createRangeSetting(
+      '散步速度', '控制沿桌面或当前窗口顶边散步的速度。', this.settings.wanderSpeed, 18, 90, 1,
       (value) => `${Math.round(value)} 像素/秒`, (value) => ({ wanderSpeed: value }),
     ));
-    container.append(this.createSelectSetting(
+    advanced.append(this.createSelectSetting(
       '散步路线',
       '选择沿屏幕往返，或每次随机决定方向与距离。',
-      [['patrol', '屏幕间来回走'], ['random', '随机方向散步']],
+      [['patrol', '沿边缘往返'], ['random', '随机方向散步']],
       this.settings.wanderMode,
       (value) => this.callbacks.onSettingsPatch({ wanderMode: value as AppSettings['wanderMode'] }),
     ));
-    container.append(this.createRangeSetting(
+    advanced.append(this.createRangeSetting(
       '自主活动频率', '控制散步和随机小动作出现的频率。', this.settings.activityFrequency, 0.5, 2, 0.05,
       (value) => `${Math.round(value * 100)}%`, (value) => ({ activityFrequency: value }),
     ));
-    container.append(this.createRangeSetting(
+    advanced.append(this.createRangeSetting(
       '视线幅度', '调节头部和眼睛追踪鼠标的幅度。', this.settings.lookIntensity, 0, 1.5, 0.05,
       (value) => `${Math.round(value * 100)}%`, (value) => ({ lookIntensity: value }),
     ));
 
-    container.append(this.createSectionTitle('行为开关', '所有设置都会保存在本机。'));
-    for (const toggle of GENERAL_TOGGLES) container.append(this.createToggle(toggle));
+    advanced.append(this.createSectionTitle('行为开关', '所有设置都会保存在本机。'));
+    for (const toggle of GENERAL_TOGGLES) {
+      if (['physics', 'autonomousBehavior', 'alwaysOnTop'].includes(toggle.key)) container.append(this.createToggle(toggle));
+      else advanced.append(this.createToggle(toggle));
+    }
     if (this.character.motionProfile.capabilities.includes('pmx-converted')) {
       const contactNote = document.createElement('p');
       contactNote.className = 'performance-note'; contactNote.dataset.garmentContact = '';
-      contactNote.textContent = this.garmentContactText(); container.append(contactNote);
+      contactNote.textContent = this.garmentContactText(); advanced.append(contactNote);
     }
 
     const sleepOptions = [1, 3, 5, 10, 20, 30].map((minutes) => [String(minutes), `${minutes} 分钟`] as [string, string]);
-    container.append(this.createSelectSetting(
+    advanced.append(this.createSelectSetting(
       '无操作后入睡', '角色会闭眼并进入缓慢呼吸状态。', sleepOptions,
       String(this.settings.sleepMinutes),
       (value) => this.callbacks.onSettingsPatch({ sleepMinutes: Number(value) }),
     ));
 
+    container.append(advanced);
+
     const shortcut = document.createElement('button');
     shortcut.type = 'button';
     shortcut.className = 'wide-button';
-    shortcut.textContent = '在桌面创建一键启动快捷方式';
+    shortcut.textContent = '创建桌面快捷方式';
     shortcut.addEventListener('click', async () => {
       const result = await window.yachiyoDesk.createDesktopShortcut();
       this.showToast(result.ok ? `快捷方式已创建：${result.path}` : (result.error ?? '快捷方式创建失败'));
@@ -487,9 +513,8 @@ export class AppUI {
       const copy = document.createElement('span');
       const strong = document.createElement('strong');
       strong.textContent = action.label;
-      const description = document.createElement('small');
-      description.textContent = action.description;
-      copy.append(strong, description);
+      button.title = action.description;
+      copy.append(strong);
       button.append(icon, copy);
       button.addEventListener('click', () => {
         this.callbacks.onReaction(action.reaction, action.speechKey);
@@ -502,7 +527,7 @@ export class AppUI {
     const reset = document.createElement('button');
     reset.type = 'button';
     reset.className = 'wide-button';
-    reset.textContent = '恢复默认姿态、大小与朝向';
+    reset.textContent = '重置姿态';
     reset.addEventListener('click', this.callbacks.onResetPose);
     container.append(reset, this.createCredit());
   }
@@ -669,13 +694,18 @@ export class AppUI {
     importButton.className = 'primary-button';
     importButton.textContent = '＋ 导入 VRM 角色';
     importButton.addEventListener('click', async () => {
+      document.body.dataset.nativeDialog = 'true'; importButton.disabled = true;
       try {
         const result = await window.yachiyoDesk.importCharacter();
         if (result.canceled) return;
-        this.showToast(result.character ? `已导入 ${result.character.displayName}` : '导入未完成');
+        if (await this.callbacks.onImportResult?.(result)) { await this.refreshCharacters(); return; }
+        this.showToast(result.character ? `已导入 ${result.character.displayName}` : result.error || '已停止导入');
         await this.refreshCharacters();
       } catch (error) {
         this.showToast(error instanceof Error ? error.message : '导入失败');
+      } finally {
+        importButton.disabled = false;
+        if (!document.querySelector('dialog[open]')) delete document.body.dataset.nativeDialog;
       }
     });
     const importPmxButton = document.createElement('button');
@@ -683,6 +713,7 @@ export class AppUI {
     importPmxButton.className = 'primary-button';
     importPmxButton.textContent = '＋ 导入 PMX（自动转换）';
     importPmxButton.addEventListener('click', async () => {
+      document.body.dataset.nativeDialog = 'true';
       importButton.disabled = true;
       importPmxButton.disabled = true;
       importPmxButton.textContent = '正在转换，请稍候…';
@@ -690,6 +721,7 @@ export class AppUI {
       try {
         const result = await window.yachiyoDesk.importPmxCharacter();
         if (result.canceled) return;
+        if (await this.callbacks.onImportResult?.(result)) { await this.refreshCharacters(); return; }
         this.showToast(result.character ? `已转换并导入 ${result.character.displayName}` : result.error || '转换未完成');
         if (result.warnings?.length) {
           window.alert(`PMX 已导入，但蒙皮检查发现无法安全自动修复的问题：\n${result.warnings.join('\n')}\n\n详细报告：${result.diagnosticPath || '请打开数据目录查看 conversion-report.json'}`);
@@ -698,6 +730,7 @@ export class AppUI {
       } catch (error) {
         this.showToast(error instanceof Error ? error.message : 'PMX 转换失败');
       } finally {
+        if (!document.querySelector('dialog[open]')) delete document.body.dataset.nativeDialog;
         importButton.disabled = false;
         importPmxButton.disabled = false;
         importPmxButton.textContent = '＋ 导入 PMX（自动转换）';
@@ -824,9 +857,8 @@ export class AppUI {
     element.className = 'section-title';
     const strong = document.createElement('strong');
     strong.textContent = title;
-    const span = document.createElement('span');
-    span.textContent = description;
-    element.append(strong, span);
+    element.title = description;
+    element.append(strong);
     return element;
   }
 
@@ -910,16 +942,15 @@ export class AppUI {
     copy.className = 'setting-copy';
     const strong = document.createElement('strong');
     strong.textContent = label;
-    const span = document.createElement('span');
-    span.textContent = description;
-    copy.append(strong, span);
+    copy.title = description;
+    copy.append(strong);
     return copy;
   }
 
   private createCredit(): HTMLElement {
     const credit = document.createElement('div');
     credit.className = 'credit';
-    credit.textContent = `${this.character.displayName} · 模型制作：${this.character.creator} · 仅本机使用`;
+    credit.textContent = `${this.character.displayName} · ${this.character.creator}`;
     return credit;
   }
 }

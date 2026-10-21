@@ -45,4 +45,29 @@ describe('original PMX source and physics consistency',()=>{
       expect(fs.existsSync(path.join(directory,'physics.pmx'))).toBe(false);
     }
   });
+  it('accepts an explicitly verified source/model pair without fabricating an import fingerprint',()=>{
+    const {source,directory,digest,manifest}=fixture();
+    fs.writeFileSync(path.join(directory,'model.vrm'),'unchanged model');
+    preservePmxPhysics(source,directory,digest);
+    const association={version:1,method:'verified-pmx-correspondence',sourceSha256:digest,
+      modelSha256:hashFileSha256(path.join(directory,'model.vrm')),verifiedAt:'2026-10-21T10:20:00Z'};
+    const current={...manifest,model:'model.vrm',sourceSha256:undefined,physicsAssociation:association};
+    expect(resolvePmxPhysicsAsset(directory,current)).toEqual({filename:path.join(directory,'physics.pmx')});
+    expect(current.sourceSha256).toBeUndefined();
+    fs.appendFileSync(path.join(directory,'model.vrm'),'changed');
+    expect(resolvePmxPhysicsAsset(directory,current).error).toContain('验证已失效');
+    fs.writeFileSync(path.join(directory,'model.vrm'),'unchanged model');
+    fs.appendFileSync(path.join(directory,'physics.pmx'),'changed');
+    expect(resolvePmxPhysicsAsset(directory,current).error).toContain('不一致');
+  });
+  it('does not treat incomplete associations as proof or override an existing import fingerprint',()=>{
+    const {source,directory,digest,manifest}=fixture();preservePmxPhysics(source,directory,digest);
+    fs.writeFileSync(path.join(directory,'model.vrm'),'model');
+    const association={version:1,method:'verified-pmx-correspondence',sourceSha256:digest,
+      modelSha256:hashFileSha256(path.join(directory,'model.vrm')),verifiedAt:'2026-10-21T10:20:00Z'};
+    for(const invalid of [{...association,method:'filename-match'},{...association,modelSha256:undefined},{...association,verifiedAt:'invalid'},{...association,version:2}]){
+      expect(resolvePmxPhysicsAsset(directory,{...manifest,model:'model.vrm',sourceSha256:undefined,physicsAssociation:invalid}).error).toContain('缺少原始');
+    }
+    expect(resolvePmxPhysicsAsset(directory,{...manifest,sourceSha256:'a'.repeat(64),physicsAssociation:association}).error).toContain('不一致');
+  });
 });

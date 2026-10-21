@@ -15,13 +15,25 @@ function preservePmxPhysics(source, directory, expectedDigest) {
   return destination;
 }
 
-/** Upgrade only when the original source is proven by the saved fingerprint. */
+/** Use the import fingerprint, or a separately verified, hash-bound source/model pair.
+ * A post-import association is not an invented historical import fingerprint.
+ */
 function resolvePmxPhysicsAsset(directory, manifest) {
   const profile = manifest.motionProfile;
   if (profile?.profileId !== 'generic-vrm' || !profile.capabilities?.includes('pmx-converted')) return {};
   const filename = path.join(directory, 'physics.pmx');
-  const digest = /^[a-f\d]{64}$/i.test(manifest.sourceSha256 ?? '') ? manifest.sourceSha256.toLowerCase() : null;
+  let digest = /^[a-f\d]{64}$/i.test(manifest.sourceSha256 ?? '') ? manifest.sourceSha256.toLowerCase() : null;
   try {
+    const association = manifest.physicsAssociation;
+    if (!digest && association?.version === 1 && association.method === 'verified-pmx-correspondence'
+      && /^[a-f\d]{64}$/i.test(association.sourceSha256 ?? '') && /^[a-f\d]{64}$/i.test(association.modelSha256 ?? '')
+      && Number.isFinite(Date.parse(association.verifiedAt))) {
+      if (hashFileSha256(path.join(directory, manifest.model)) !== association.modelSha256.toLowerCase()) {
+        return { error: '角色模型已变化，原始 PMX 对应验证已失效，请重新验证或导入。' };
+      }
+      digest = association.sourceSha256.toLowerCase();
+    }
+    if (!digest) return { error: '缺少原始 PMX 指纹，请重新导入以验证衣物与头发物理来源。' };
     if (!fs.existsSync(filename) && digest) {
       const reportPath = path.join(directory, 'conversion-report.json');
       if (fs.existsSync(reportPath)) {

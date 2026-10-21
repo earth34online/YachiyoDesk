@@ -13,12 +13,16 @@ const {
   protocol,
   screen,
   shell,
+  safeStorage,
+  desktopCapturer,
 } = require('electron');
+const { CompanionHost } = require('./companion-host.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { SettingsStore } = require('./settings.cjs');
 const { inspectVrmFile } = require('./vrm-file.cjs');
+const { validateContactConfiguration } = require('./contact-configuration.cjs');
 const { loadApplicationIcon } = require('./app-icon.cjs');
 const { protectCompanionWindow } = require('./window-policy.cjs');
 const { readTestCharacterMetadata } = require('./test-character.cjs');
@@ -26,6 +30,8 @@ const { preservePmxPhysics, resolvePmxPhysicsAsset } = require('./pmx-physics-as
 const { validateAnatomy, validateFingerFlexion, garmentSurfaceIssues } = require('./motion-quality.cjs');
 const { switchCharacterScale, rememberCharacterScale } = require('./character-scale.cjs');
 const { calculateDragPosition, clampDragPosition, horizontalWindowRange, planGenericWalk } = require('./window-drag.cjs');
+const { DesktopContacts } = require('./desktop-contacts.cjs');
+const { WindowSurfaces } = require('./window-surfaces.cjs');
 const { PMX_CONVERTED_MOTION_PROFILE, sanitizeMotionProfile } = require('./motion-profile.cjs');
 const { convertPmxToVrm, describePmxConversionFailure, resolvePmxConverter } = require('./pmx-converter.cjs');
 const {
@@ -121,6 +127,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow = null;
 let tray = null;
 let settingsStore = null;
+let companionHost = null;
 let isQuitting = false;
 let smokeTimer = null;
 let boundsSaveTimer = null;
@@ -139,6 +146,70 @@ let patrolDirection = -1;
 let interactionPanelOpen = false;
 let runtimeIsReady = false;
 let stageSuspended = false;
+let desktopContacts = null;
+let windowSurfaces = null;
+let windowSurfaceTimer = null;
+let windowSurfaceGeneration = 0;
+let resumeDesktopDrop = false;
+
+function stopWindowSurfaces() {
+  ++windowSurfaceGeneration;
+  clearTimeout(windowSurfaceTimer); windowSurfaceTimer = null;
+  windowSurfaces?.stop(); windowSurfaces = null;
+}
+
+function reconcileWindowSurfaces() {
+  stopWindowSurfaces();
+  if (!desktopContacts || !runtimeIsReady || stageSuspended || IS_AUTOMATED_TEST || IS_VISUAL_REVIEW
+    || !settingsStore.get().desktopContacts || !settingsStore.get().windowContacts || settingsStore.get().lockPosition) return;
+  const generation = windowSurfaceGeneration;
+  let firstRead = true;
+  windowSurfaces = new WindowSurfaces(screen, error => {
+    log('WARN','Window boundary detection unavailable',String(error.message));
+    stopWindowSurfaces(); desktopContacts?.updateWindows([]);
+    sendCommand('desktop-contact-status',{available:false});
+  });
+  const poll = async () => {
+    const surfaces = await windowSurfaces?.read();
+    if (generation !== windowSurfaceGeneration) return;
+    if (surfaces) {
+      desktopContacts?.updateWindows(surfaces);
+      if (firstRead) { firstRead=false; log('INFO','Desktop window contacts ready',{surfaceCount:surfaces.length}); }
+    }
+    // Tracking is 20 Hz only while standing on a real application; otherwise
+    // two lightweight boundary reads per second suffice for a future drop.
+    windowSurfaceTimer = setTimeout(poll,desktopContacts?.support?.id && desktopContacts.support.id !== 'screen' ? 50 : 500);
+  };
+  void poll();
+}
+
+function initializeDesktopContacts() {
+  if (desktopContacts || !mainWindow) return;
+  desktopContacts = new DesktopContacts({
+    bounds: () => mainWindow.getBounds(), viewport: () => avatarViewportBounds,
+    settings: () => settingsStore.get(), now: () => Date.now(),
+    active: () => runtimeIsReady && !stageSuspended && !windowDrag && !interactionPanelOpen && Boolean(mainWindow && !mainWindow.isDestroyed()),
+    area: () => {
+      const bounds = mainWindow.getBounds();
+      const display = screen.getDisplayNearestPoint({x:Math.round(bounds.x+bounds.width/2),y:Math.round(bounds.y+bounds.height-2)});
+      return display.workArea || display.bounds;
+    },
+    move: (x,y) => mainWindow.setBounds({x:Math.round(x),y:Math.round(y),width:DEFAULT_WIDTH,height:DEFAULT_HEIGHT},false),
+    command: state => {
+      if (state.phase === 'edge' && state.wall) {
+        const bounds = mainWindow.getBounds();
+        const display = screen.getDisplayNearestPoint({x:Math.round(bounds.x+bounds.width/2),y:Math.round(bounds.y+bounds.height-2)});
+        state.wallX = ((state.direction === -1 ? display.bounds.x : display.bounds.x+display.bounds.width)-bounds.x)
+          * (avatarViewportBounds?.canvasWidth || bounds.width) / bounds.width;
+        state.wallScreenX = state.direction === -1 ? display.bounds.x : display.bounds.x+display.bounds.width;
+      }
+      sendCommand('desktop-contact',state);
+    },
+    settled: id => { persistWindowBounds(); log('INFO','Desktop contact landed',{surface:id === 'screen'?'desktop':'application'}); scheduleAutonomy(1400); },
+    supportMoved: () => { stopAutonomousMovement(false); scheduleAutonomy(1000); },
+  });
+  reconcileWindowSurfaces();
+}
 let latestClickThrough = false;
 let characterSwitchInProgress = false;
 let interactionFlushToken = 0;
@@ -289,6 +360,9 @@ function readCharacterManifest(directory, id, builtIn) {
   const displayName = typeof manifest.displayName === 'string' && manifest.displayName.trim()
     ? manifest.displayName.trim()
     : id;
+  let contactConfiguration;
+  try { if(manifest.contactConfiguration)contactConfiguration=validateContactConfiguration(manifest.contactConfiguration); }
+  catch { /* Invalid optional contact settings never prevent loading the source model. */ }
   return {
     id,
     displayName,
@@ -299,6 +373,8 @@ function readCharacterManifest(directory, id, builtIn) {
     sourceFileName: manifest.sourceFileName,
     sourceFormat: manifest.sourceFormat === 'pmx' ? 'pmx' : 'vrm',
     sourceSha256: /^[a-f\d]{64}$/i.test(manifest.sourceSha256 ?? '') ? manifest.sourceSha256.toLowerCase() : undefined,
+    physicsAssociation: manifest.physicsAssociation,
+    contactConfiguration,
     messages: {
       ...genericMessages(displayName),
       ...(manifest.messages && typeof manifest.messages === 'object' ? manifest.messages : {}),
@@ -429,6 +505,7 @@ function createDesktopShortcut() {
 
 function resolveAsset(requestUrl) {
   const url = new URL(requestUrl);
+  if (url.hostname === 'import-preview') return companionHost.imports.asset(requestUrl);
   const isUserCharacter = url.hostname === 'user-characters';
   const relative = decodeURIComponent(path.join(...url.pathname.split('/').filter(Boolean)));
   const root = path.resolve(isUserCharacter ? userCharactersRoot() : projectRoot());
@@ -490,7 +567,11 @@ function sanitizeAvatarViewportBounds(value) {
   const canvasWidth = Number(value?.canvasWidth);
   if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(canvasWidth)) return null;
   if (canvasWidth <= 0 || left < 0 || right <= left || right > canvasWidth) return null;
-  return { left, right, canvasWidth };
+  const extra = {};
+  for (const key of ['canvasHeight','footY','footLeft','footRight','avatarHeight']) {
+    if (typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0) extra[key] = value[key];
+  }
+  return { left, right, canvasWidth, ...extra };
 }
 
 function updateAvatarViewportBounds(value, anchorInitialRight = false) {
@@ -652,13 +733,14 @@ function restoreFocusTimer() {
   try {
     const saved = JSON.parse(fs.readFileSync(focusStatePath(), 'utf8'));
     focusState = {
-      running: Boolean(saved.running) && Number(saved.endAt) > Date.now(),
+      running: Boolean(saved.running) && Number.isFinite(Number(saved.endAt)) && Number(saved.endAt) > 0,
       mode: saved.mode === 'break' ? 'break' : 'focus',
       totalSeconds: Math.max(60, Math.min(10800, Number(saved.totalSeconds) || 1500)),
       endAt: Number(saved.endAt) || 0,
-      sessionsCompleted: Math.max(0, Math.floor(Number(saved.sessionsCompleted) || 0)),
+      sessionsCompleted: Number.isFinite(Number(saved.sessionsCompleted)) ? Math.max(0, Math.floor(Number(saved.sessionsCompleted) || 0)) : 0,
     };
     if (focusState.running) {
+      if (focusState.endAt <= Date.now()) { completeFocusTimer(); return; }
       focusTimer = setInterval(() => {
         if (focusState.endAt <= Date.now()) completeFocusTimer();
         else emitFocusState();
@@ -768,12 +850,18 @@ function applySettings(settings) {
 
 function patchSettings(patch) {
   const current = settingsStore.get();
-  const withScale = Object.prototype.hasOwnProperty.call(patch, 'zoom')
+  const withScale = Object.prototype.hasOwnProperty.call(patch, 'zoom') && !Object.prototype.hasOwnProperty.call(patch, 'characterZooms')
     ? { ...patch, characterZooms: rememberCharacterScale(current, patch.zoom) }
     : patch;
   const settings = settingsStore.patch(withScale);
   applySettings(settings);
   notifySettings(settings);
+  if (desktopContacts && ['desktopContacts','windowContacts','lockPosition','zoom','rotationY','window'].some(key => Object.hasOwn(patch,key))) {
+    const lostWindow = desktopContacts.support && desktopContacts.support.id !== 'screen' && patch.windowContacts === false;
+    desktopContacts.cancel();
+    reconcileWindowSurfaces();
+    if (lostWindow && settings.desktopContacts && !settings.lockPosition) desktopContacts.drop();
+  }
   if (!settings.autonomousBehavior || settings.lockPosition) {
     stopAutonomousMovement();
     clearTimeout(autonomyTimer);
@@ -799,6 +887,7 @@ function applyAutoStart(enabled) {
 }
 
 function resetWindowPosition() {
+  desktopContacts?.cancel();
   if (!mainWindow || mainWindow.isDestroyed()) return null;
   stopAutonomousMovement(false);
   const bounds = defaultBounds();
@@ -858,6 +947,7 @@ function scheduleAutonomy(delayMs, allowWhilePanelOpen = false) {
 }
 
 function noteUserActivity() {
+  desktopContacts?.interruptReaction();
   lastUserActivityAt = Date.now();
   clearTimeout(autonomyTimer);
   autonomyTimer = null;
@@ -888,6 +978,7 @@ function setInteractionPanelOpen(open) {
 }
 
 function startAutonomousWalk() {
+  if (desktopContacts?.busy()) return false;
   if (!runtimeIsReady || stageSuspended || autonomyMove || autonomyMoveTimer || !mainWindow || mainWindow.isDestroyed()) return false;
   const settings = settingsStore.get();
   const bounds = mainWindow.getBounds();
@@ -898,15 +989,21 @@ function startAutonomousWalk() {
   const displayBounds = currentDisplay.bounds;
   const horizontal = horizontalWindowRange(displayBounds, bounds.width, avatarViewportBounds);
   if (!horizontal) return false;
+  const supportRange = desktopContacts?.range();
+  if (supportRange) {
+    horizontal.minimumX = Math.max(horizontal.minimumX,supportRange.minimumX);
+    horizontal.maximumX = Math.min(horizontal.maximumX,supportRange.maximumX);
+  }
   const motionProfile = activeCharacterRecord().manifest.motionProfile;
   const generic = motionProfile.profileId === 'generic-vrm';
+  const edgeAware = generic || settings.desktopContacts;
   const { minimumX, maximumX } = horizontal;
-  if (maximumX - minimumX < (generic ? 1 : 100)) return false;
+  if (maximumX - minimumX < (edgeAware ? 1 : 100)) return false;
 
   let direction = settings.wanderMode === 'random'
     ? (Math.random() < 0.5 ? -1 : 1)
     : patrolDirection;
-  if (!generic) {
+  if (!edgeAware) {
     if (bounds.x <= minimumX + 80) direction = 1;
     if (bounds.x >= maximumX - 80) direction = -1;
   }
@@ -918,20 +1015,23 @@ function startAutonomousWalk() {
   let distance = Math.min(available, requestedDistance);
   let startX = bounds.x;
   let targetX = Math.round(startX + direction * distance);
-  if (generic) {
+  if (edgeAware) {
     const plan = planGenericWalk(bounds.x, horizontal, direction, requestedDistance);
     if (!plan || plan.distance < 1) return false;
     ({ startX, targetX, distance, direction } = plan);
   } else if (distance < 70) return false;
   if (settings.wanderMode === 'patrol') patrolDirection = direction;
 
-  const floorY = Math.round(displayBounds.y + displayBounds.height - bounds.height);
+  const floorY = Math.round(desktopContacts?.floorY() ?? (settings.desktopContacts
+    ? (currentDisplay.workArea || displayBounds).y + (currentDisplay.workArea || displayBounds).height
+      - (avatarViewportBounds?.footY ?? bounds.height)
+    : displayBounds.y + displayBounds.height - bounds.height));
   if (bounds.y !== floorY) {
     mainWindow.setBounds({ x: bounds.x, y: floorY, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }, false);
   }
   const startY = floorY;
   const targetY = startY;
-  const reachesEdge = generic && (targetX === minimumX || targetX === maximumX);
+  const reachesEdge = edgeAware && (targetX === minimumX || targetX === maximumX);
   const effectiveSpeed = Math.max(12, settings.wanderSpeed * motionProfile.walk.speedScale);
   const durationMs = Math.max(generic ? 200 : 3200, distance / effectiveSpeed * 1000);
   const startedAt = Date.now();
@@ -1019,7 +1119,10 @@ function startAutonomousWalk() {
       // and walking silhouettes differ by a few pixels; rechecking only the
       // narrower idle pose otherwise causes repeated one-pixel edge walks.
       if (settingsStore.get().wanderMode === 'patrol') patrolDirection = reachesEdge ? -direction : direction;
-      if (walksSinceInterlude >= nextInterludeAfterWalks) runAutonomousInterlude();
+      if (reachesEdge && settingsStore.get().desktopContacts) {
+        desktopContacts?.edge(direction);
+        scheduleAutonomy(1450);
+      } else if (walksSinceInterlude >= nextInterludeAfterWalks) runAutonomousInterlude();
       else scheduleAutonomy(randomRange(320, 760));
     }
   }, 16);
@@ -1104,6 +1207,9 @@ function toggleSetting(key) {
 }
 
 function resetRuntimeState() {
+  resumeDesktopDrop = false;
+  stopWindowSurfaces();
+  desktopContacts?.cancel(); desktopContacts = null;
   runtimeIsReady = false;
   clearTimeout(autonomyTimer);
   autonomyTimer = null;
@@ -1142,6 +1248,7 @@ async function switchCharacter(id) {
   characterSwitchInProgress = true;
   try {
     if (!await flushRendererInteractionSettings()) return { ok: false, error: '当前角色设置未能保存，请稍后重试切换。' };
+    companionHost?.dispose();
     resetRuntimeState();
     settingsStore.patch(switchCharacterScale(settingsStore.get(), id));
     notifySettings(settingsStore.get());
@@ -1267,6 +1374,8 @@ function showCompanionWindow() {
 }
 
 function recoverChangedDisplay() {
+  desktopContacts?.cancel();
+  reconcileWindowSurfaces();
   if (!mainWindow || mainWindow.isDestroyed()) return;
   clearTimeout(windowDragTimer);
   windowDragTimer = null;
@@ -1315,23 +1424,33 @@ function beginWindowDrag(point) {
   const screenY = Number(point?.screenY);
   if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return;
   noteUserActivity();
+  desktopContacts?.cancel();
   const [windowX, windowY] = mainWindow.getPosition();
-  windowDrag = { originScreenX: screenX, originScreenY: screenY, screenX, screenY, windowX, windowY };
+  windowDrag = { originScreenX: screenX, originScreenY: screenY, screenX, screenY, windowX, windowY, lastAt:Date.now(),velocityY:0,distance:0 };
 }
 
 function updateWindowDrag(point, finish = false) {
   if (!windowDrag) return;
   const screenX = Number(point?.screenX);
   const screenY = Number(point?.screenY);
-  if (Number.isFinite(screenX)) windowDrag.screenX = screenX;
-  if (Number.isFinite(screenY)) windowDrag.screenY = screenY;
+  const now = Date.now();
+  if (Number.isFinite(screenX) && Number.isFinite(screenY)) {
+    windowDrag.distance += Math.hypot(screenX-windowDrag.screenX,screenY-windowDrag.screenY);
+    const elapsed = (now-windowDrag.lastAt)/1000;
+    if (elapsed > 0) windowDrag.velocityY = elapsed < .15 ? (screenY-windowDrag.screenY)/elapsed : 0;
+    windowDrag.screenX=screenX; windowDrag.screenY=screenY; windowDrag.lastAt=now;
+  }
   if (finish) {
     clearTimeout(windowDragTimer);
     windowDragTimer = null;
     flushWindowDrag();
+    const drop = windowDrag;
     windowDrag = null;
     persistWindowBounds();
     noteUserActivity();
+    if (drop.distance >= 7 && desktopContacts?.drop(drop.velocityY)) {
+      clearTimeout(autonomyTimer); autonomyTimer=null;
+    }
   } else {
     scheduleWindowDragFlush();
   }
@@ -1342,6 +1461,9 @@ function updateStageLifecycle() {
   stageSuspended = !mainWindow.isVisible() || mainWindow.isMinimized();
   sendCommand('stage-suspended', stageSuspended);
   if (stageSuspended) {
+    stopWindowSurfaces();
+    resumeDesktopDrop ||= Boolean(desktopContacts?.fall);
+    desktopContacts?.cancel(false);
     clearTimeout(autonomyTimer);
     autonomyTimer = null;
     stopAutonomousMovement();
@@ -1349,6 +1471,8 @@ function updateStageLifecycle() {
     windowDragTimer = null;
     windowDrag = null;
   } else if (runtimeIsReady) {
+    reconcileWindowSurfaces();
+    if (resumeDesktopDrop) { resumeDesktopDrop=false; desktopContacts?.drop(); }
     scheduleAutonomy(350);
   }
 }
@@ -1390,7 +1514,8 @@ async function createWindow() {
   });
 
   stageSuspended = true;
-  protectCompanionWindow(mainWindow, shell);
+  protectCompanionWindow(mainWindow, shell, () => Boolean(companionHost && Date.now() < companionHost.microphoneUntil));
+  mainWindow.webContents.on('did-start-loading', () => companionHost?.dispose());
   for (const event of ['show', 'hide', 'minimize', 'restore']) mainWindow.on(event, updateStageLifecycle);
   mainWindow.setMenu(null);
   mainWindow.setAlwaysOnTop(settings.alwaysOnTop);
@@ -1399,6 +1524,7 @@ async function createWindow() {
   mainWindow.on('move', persistWindowBounds);
   mainWindow.on('resize', persistWindowBounds);
   mainWindow.on('closed', () => {
+    stopWindowSurfaces(); desktopContacts?.cancel(); desktopContacts=null;
     clearTimeout(windowDragTimer);
     windowDragTimer = null;
     windowDrag = null;
@@ -1439,6 +1565,7 @@ async function createWindow() {
 }
 
 function bindIpc() {
+  companionHost?.bind(ipcMain);
   ipcMain.handle('app:get-bootstrap', () => {
     const active = activeCharacterRecord();
     const physics = resolvePmxPhysicsAsset(active.directory, active.manifest);
@@ -1516,17 +1643,10 @@ function bindIpc() {
   ipcMain.handle('pet:interact', (_event, action) => interactWithPet(action));
   ipcMain.handle('characters:list', () => installedCharacters());
   ipcMain.handle('characters:switch', (_event, id) => switchCharacter(id));
-  ipcMain.handle('characters:import', async () => {
-    const selection = await dialog.showOpenDialog(mainWindow, {
-      title: '导入本地 VRM 角色',
-      buttonLabel: '导入角色',
-      properties: ['openFile'],
-      filters: [{ name: 'VRM 角色模型', extensions: ['vrm'] }],
-    });
-    if (selection.canceled || selection.filePaths.length === 0) return { canceled: true };
+  const importVrmSource = async (sourcePath, allowRepair = true, signal) => {
+    const importEpoch=companionHost?.imports.epoch;
     let importDirectory = null;
     try {
-      const sourcePath = selection.filePaths[0];
       const metadata = inspectVrmFile(sourcePath);
       const recommended = recommendedYachiyoImport(sourcePath, 'vrm');
       const rawBase = path.parse(sourcePath).name
@@ -1537,10 +1657,11 @@ function bindIpc() {
         .slice(0, 38) || 'character';
       const id = `${rawBase}-${Date.now().toString(36)}`.slice(0, 63);
       const root = userCharactersRoot();
-      const directory = path.resolve(root, id);
+      const directory = path.resolve(root, companionHost ? `.pending-${id}` : id);
       if (!directory.startsWith(`${path.resolve(root)}${path.sep}`)) throw new Error('角色目录不安全。');
       importDirectory = directory;
       fs.mkdirSync(directory, { recursive: true });
+      if(companionHost)fs.writeFileSync(path.join(directory,'import-transaction.json'),JSON.stringify({owner:'yachiyodesk-import',id}));
       fs.copyFileSync(sourcePath, path.join(directory, 'model.vrm'));
       const manifest = {
         id,
@@ -1548,11 +1669,13 @@ function bindIpc() {
         originalTitle: metadata.displayName,
         creator: metadata.creator,
         sourceFileName: path.basename(sourcePath),
-        sourceFormat: 'vrm',
+        sourceFormat: metadata.convertedPmx ? 'pmx' : 'vrm',
+        modelSha256: hashFileSha256(path.join(directory, 'model.vrm')),
         model: 'model.vrm',
         credit: `${metadata.displayName} · ${metadata.creator}`,
         messages: recommended?.messages || genericMessages(metadata.displayName),
         behavior: recommended?.behavior || sanitizeBehaviorProfile(),
+        ...(metadata.convertedPmx ? { motionProfile: PMX_CONVERTED_MOTION_PROFILE } : {}),
         ...(recommended ? {
           sourceSha256: recommended.sourceSha256,
           modelSha256: recommended.sourceSha256,
@@ -1560,6 +1683,7 @@ function bindIpc() {
         } : {}),
       };
       fs.writeFileSync(path.join(directory, 'character.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+      if (companionHost) return await companionHost.imports.stage(directory, { ...manifest, motionProfile: readCharacterManifest(directory, id, false).motionProfile }, {}, signal);
       rebuildTrayMenu();
       const character = installedCharacters().find((item) => item.id === id);
       log('INFO', 'Imported local character', { id, sourceFileName: path.basename(sourcePath), recommendedModel: recommended?.kind || null });
@@ -1569,6 +1693,9 @@ function bindIpc() {
         try { fs.rmSync(importDirectory, { recursive: true, force: true }); } catch { /* best-effort rollback */ }
       }
       log('ERROR', 'Character import failed', String(error?.stack || error));
+      if (importEpoch!==companionHost?.imports.epoch || error.code==='IMPORT_CANCELED') return {canceled:true};
+      if (!allowRepair) throw error;
+      if (companionHost) return companionHost.imports.offer(sourcePath, error);
       await dialog.showMessageBox(mainWindow, {
         type: 'error',
         title: '角色导入失败',
@@ -1577,18 +1704,13 @@ function bindIpc() {
       });
       return { canceled: false };
     }
-  });
-  ipcMain.handle('characters:import-pmx', async () => {
-    const selection = await dialog.showOpenDialog(mainWindow, {
-      title: '导入并转换本地 PMX 角色',
-      buttonLabel: '转换并导入',
-      properties: ['openFile'],
-      filters: [{ name: 'MikuMikuDance PMX 模型', extensions: ['pmx'] }],
-    });
-    if (selection.canceled || selection.filePaths.length === 0) return { canceled: true };
+  };
+  const importPmxSource = async (sourcePath, allowRepair = true, parentSignal) => {
+    const importEpoch=companionHost?.imports.epoch;
+    const lifecycle=companionHost?.imports.lifecycle.signal;
+    const signal=parentSignal&&lifecycle?AbortSignal.any([parentSignal,lifecycle]):parentSignal||lifecycle;
     let importDirectory = null;
     try {
-      const sourcePath = selection.filePaths[0];
       const recommended = recommendedYachiyoImport(sourcePath, 'pmx');
       const sourceSha256 = recommended?.sourceSha256 || hashFileSha256(sourcePath);
       const rawBase = path.parse(sourcePath).name
@@ -1599,14 +1721,16 @@ function bindIpc() {
         .slice(0, 38) || 'pmx-character';
       const id = `${rawBase}-${Date.now().toString(36)}`.slice(0, 63);
       const root = userCharactersRoot();
-      const directory = path.resolve(root, id);
+      const directory = path.resolve(root, companionHost ? `.pending-${id}` : id);
       if (!directory.startsWith(`${path.resolve(root)}${path.sep}`)) throw new Error('角色目录不安全。');
       importDirectory = directory;
       fs.mkdirSync(directory, { recursive: true });
+      if(companionHost)fs.writeFileSync(path.join(directory,'import-transaction.json'),JSON.stringify({owner:'yachiyodesk-import',id}));
       const outputPath = path.join(directory, 'model.vrm');
       const reportPath = path.join(directory, 'conversion-report.json');
       if (!recommended) preservePmxPhysics(sourcePath, directory, sourceSha256);
       const conversion = await convertPmxToVrm({
+        signal,
         sourcePath,
         outputPath,
         reportPath,
@@ -1617,6 +1741,7 @@ function bindIpc() {
         }),
       });
       const metadata = inspectVrmFile(outputPath);
+      if (importEpoch!==companionHost?.imports.epoch) throw Object.assign(new Error('角色已切换，导入已取消。'),{code:'IMPORT_CANCELED'});
       if (hashFileSha256(sourcePath) !== sourceSha256) throw new Error('源 PMX 在转换期间发生变化，请重新导入。');
       const manifest = {
         id,
@@ -1638,6 +1763,7 @@ function bindIpc() {
         } : {}),
       };
       fs.writeFileSync(path.join(directory, 'character.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+      if (companionHost) return await companionHost.imports.stage(directory, { ...manifest, motionProfile: readCharacterManifest(directory, id, false).motionProfile }, { warnings: conversion.report.skinBindings?.warnings || [] }, signal);
       rebuildTrayMenu();
       const character = installedCharacters().find((item) => item.id === id);
       log('INFO', 'Converted and imported local PMX character', {
@@ -1659,7 +1785,7 @@ function bindIpc() {
         diagnosticPath = path.join(diagnosticsDirectory, `pmx-import-${Date.now()}.json`);
         fs.writeFileSync(diagnosticPath, `${JSON.stringify({
           summary,
-          source: selection.filePaths[0],
+          source: sourcePath,
           report: error?.report || null,
           stdout: error?.stdout || '',
           stderr: error?.stderr || '',
@@ -1673,6 +1799,9 @@ function bindIpc() {
         try { fs.rmSync(importDirectory, { recursive: true, force: true }); } catch { /* best-effort rollback */ }
       }
       log('ERROR', 'PMX character conversion/import failed', { summary, diagnosticPath, error: String(error?.stack || error) });
+      if (importEpoch!==companionHost?.imports.epoch || error.code==='IMPORT_CANCELED') return {canceled:true};
+      if (!allowRepair) throw error;
+      if (companionHost) return companionHost.imports.offer(sourcePath, error);
       await dialog.showMessageBox(mainWindow, {
         type: 'error',
         title: 'PMX 导入失败',
@@ -1681,6 +1810,15 @@ function bindIpc() {
       });
       return { canceled: false, error: summary, diagnosticPath };
     }
+  };
+  if (companionHost) companionHost.importSource = (source, format, allowRepair, signal) => format === 'pmx' ? importPmxSource(source, allowRepair, signal) : importVrmSource(source, allowRepair, signal);
+  ipcMain.handle('characters:import', async () => {
+    const selection = await dialog.showOpenDialog(mainWindow, { title: '导入本地 VRM 角色', properties: ['openFile'], filters: [{name:'VRM',extensions:['vrm']}] });
+    return selection.canceled || !selection.filePaths.length ? {canceled:true} : importVrmSource(selection.filePaths[0]);
+  });
+  ipcMain.handle('characters:import-pmx', async () => {
+    const selection = await dialog.showOpenDialog(mainWindow, { title: '导入并转换本地 PMX 角色', properties: ['openFile'], filters: [{name:'PMX',extensions:['pmx']}] });
+    return selection.canceled || !selection.filePaths.length ? {canceled:true} : importPmxSource(selection.filePaths[0]);
   });
   ipcMain.handle('characters:remove', async (_event, id) => {
     if (!isSafeCharacterId(id) || id === 'yachiyo') return { ok: false, error: '内置八千代不能删除。' };
@@ -1712,6 +1850,7 @@ function bindIpc() {
     // Reconcile again at readiness so an initially hidden load cannot stay paused.
     updateStageLifecycle();
     updateAvatarViewportBounds(details?.avatarViewportBounds, true);
+    initializeDesktopContacts();
     log('INFO', 'Avatar runtime ready', details);
     if (IS_SMOKE && modelSmokeRunning) return;
     if (IS_SMOKE) modelSmokeRunning = true;
@@ -1798,9 +1937,9 @@ function bindIpc() {
       fs.writeFileSync(settingsScreenshotPath, settingsImage.toPNG());
 
       const panelScreenshots = { general: settingsScreenshotPath };
-      for (const [index, pageName] of [[1, 'actions'], [2, 'focus'], [3, 'characters'], [4, 'performance']]) {
+      for (const pageName of ['actions', 'focus', 'characters', 'chat', 'studio', 'performance']) {
         await mainWindow.webContents.executeJavaScript(
-          `document.querySelectorAll('.control-tab')[${index}]?.click()`,
+          `document.querySelector('.control-tab[data-page="${pageName}"]')?.click()`,
           true,
         );
         await new Promise((resolve) => setTimeout(resolve, pageName === 'characters' ? 500 : 180));
@@ -1816,7 +1955,7 @@ function bindIpc() {
       sendCommand('show-settings');
       await new Promise((resolve) => setTimeout(resolve, 220));
       await mainWindow.webContents.executeJavaScript(
-        `document.querySelectorAll('.control-tab')[1]?.click(); document.querySelector('.action-button')?.click()`,
+        `document.querySelector('.control-tab[data-page="actions"]')?.click(); document.querySelector('.action-button')?.click()`,
         true,
       );
       await new Promise((resolve) => setTimeout(resolve, 260));
@@ -1841,22 +1980,27 @@ function bindIpc() {
       // opening, before the next animation frame can add is-visible. Repeat it
       // so a stale requestAnimationFrame cannot occasionally resurrect the UI.
       let rapidOutsideClosePassed = true;
+      const rapidOutsideCloseStates = [];
       for (let attempt = 0; attempt < 6; attempt += 1) {
-        sendCommand('show-settings');
-        await new Promise((resolve) => setTimeout(resolve, 3));
-        await mainWindow.webContents.executeJavaScript(
-          `document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 2, clientY: 2 }))`,
-          true,
-        );
-        await new Promise((resolve) => setTimeout(resolve, 210));
+        // Execute open and outside-close in one renderer task, before its next
+        // RAF. Observe on that renderer's timer queue as well: a main-process
+        // timer followed by high-priority executeJavaScript can overtake the
+        // renderer's overdue 180 ms hide timer under real PMX/GPU load.
+        // Keep the same 210 ms wait and all hidden/class predicates.
         const state = await mainWindow.webContents.executeJavaScript(
-          `({ hidden: document.querySelector('#settings-panel')?.hidden === true,
+          `new Promise(resolve => {
+            document.querySelector('#dock-more').click();
+            document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 2, clientY: 2 }));
+            const pointerDisabledImmediately = getComputedStyle(document.querySelector('#settings-panel')).pointerEvents === 'none';
+            window.setTimeout(() => resolve({ hidden: document.querySelector('#settings-panel')?.hidden === true,
               visibleClass: document.querySelector('#settings-panel')?.classList.contains('is-visible') === true,
-              bodyClass: document.body.classList.contains('settings-open') })`,
+              bodyClass: document.body.classList.contains('settings-open'), pointerDisabledImmediately }), 210);
+          })`,
           true,
         );
+        rapidOutsideCloseStates.push(state);
         rapidOutsideClosePassed = rapidOutsideClosePassed
-          && Boolean(state?.hidden) && !Boolean(state?.visibleClass) && !Boolean(state?.bodyClass);
+          && Boolean(state?.hidden) && !Boolean(state?.visibleClass) && !Boolean(state?.bodyClass) && Boolean(state?.pointerDisabledImmediately);
       }
 
       sendCommand('show-settings');
@@ -1900,6 +2044,7 @@ function bindIpc() {
         actionAutoClosed: Boolean(actionAutoClosed),
         outsideClickClosed: Boolean(outsideClickClosed),
         rapidOutsideClosePassed,
+        rapidOutsideCloseStates,
         blurClosed: Boolean(blurClosed),
         dockActions: Number(dockState?.actions),
         dockStats: Number(dockState?.stats),
@@ -2614,6 +2759,16 @@ if (!gotLock) {
     fs.mkdirSync(logDirectory, { recursive: true });
     logFile = path.join(logDirectory, 'YachiyoDesk.log');
     settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'));
+    companionHost = new CompanionHost({ directory: path.join(app.getPath('userData'), 'companion'),
+      electron: { dialog, nativeImage, safeStorage, desktopCapturer }, window: () => mainWindow,
+      character: activeCharacterRecord, characters: installedCharacters, settings: () => settingsStore.get(),
+      patch: patchSettings, switchCharacter, command: sendCommand, focus: startFocusTimer,
+      charactersRoot: userCharactersRoot, refreshCharacters: rebuildTrayMenu,
+      restoreWindow: saved => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        stopAutonomousMovement(false);mainWindow.setBounds(fixedSurfaceBounds(saved) || defaultBounds(),false);
+        const clamped=clampCurrentWindowToDisplay();if(clamped)settingsStore.patch({window:clamped});
+      } });
     restoreFocusTimer();
     restorePetStates();
     prepareSmokeCharacter();
@@ -2643,6 +2798,8 @@ if (!gotLock) {
 }
 
 app.on('before-quit', () => {
+  stopWindowSurfaces(); desktopContacts?.cancel();
+  companionHost?.dispose();
   isQuitting = true;
   clearTimeout(smokeTimer);
   clearTimeout(boundsSaveTimer);

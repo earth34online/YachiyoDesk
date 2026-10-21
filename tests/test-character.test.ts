@@ -14,7 +14,9 @@ function model(manifest?: object) {
 describe('motion fixture metadata', () => {
   it('retains the adjacent imported PMX profile and its tuning', () => {
     const motionProfile = { capabilities: ['pmx-converted'], handPose: { armAxisSign: -1 } };
-    expect(readTestCharacterMetadata(model({ sourceFormat: 'pmx', motionProfile }), {})).toMatchObject({ sourceFormat: 'pmx', motionProfile });
+    const physicsAssociation={version:1,method:'verified-pmx-correspondence',sourceSha256:'a'.repeat(64),modelSha256:'b'.repeat(64),verifiedAt:'2026-10-21T10:28:00Z'};
+    const contactConfiguration={mode:'automatic',radiusScale:{leftUpperArm:.8}};
+    expect(readTestCharacterMetadata(model({ sourceFormat: 'pmx', motionProfile,physicsAssociation,contactConfiguration }), {})).toMatchObject({ sourceFormat: 'pmx', motionProfile,physicsAssociation,contactConfiguration });
   });
   it('supports an explicit PMX format when only the converted file is available', () => {
     expect(readTestCharacterMetadata(model(), { YACHIYO_DESK_TEST_FORMAT: 'pmx' })).toMatchObject({ sourceFormat: 'pmx', motionProfile: { capabilities: ['pmx-converted'], handPose: { armAxisSign: -1 } } });

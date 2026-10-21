@@ -9,6 +9,8 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('yachiyoDesk', {
+  companionRequest: (action, input) => ipcRenderer.invoke('companion:request', action, input),
+  onCompanionEvent: (callback) => subscribe('companion:event', callback),
   getBootstrap: () => ipcRenderer.invoke('app:get-bootstrap'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
   flushInteractionSettings: (patch, characterId) => ipcRenderer.sendSync('settings:flush-interaction', { patch, characterId }),

@@ -1,0 +1,7 @@
+{
+  "name": "AIRI 自然待机",
+  "source": "https://github.com/moeru-ai/airi/blob/c8943f47ca7df375e043461c964ddb2ace3a064e/packages/stage-ui-three/src/assets/vrm/animations/idle_loop.vrma",
+  "copyright": "Copyright (c) 2024-PRESENT Neko Ayaka",
+  "license": "MIT",
+  "role": "Optional reference idle animation; retargeted to the current character without changing native Yachiyo poses."
+}

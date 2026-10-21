@@ -370,6 +370,7 @@ body.companion-dock-open:not(.settings-open) .companion-dock {
 }
 
 .settings-panel {
+  pointer-events: none;
   position: fixed;
   z-index: 30;
   top: 24px;
@@ -391,6 +392,7 @@ body.companion-dock-open:not(.settings-open) .companion-dock {
 }
 
 .settings-panel.is-visible {
+  pointer-events: auto;
   opacity: 1;
   transform: translateX(0) scale(1);
 }

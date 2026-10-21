@@ -23,6 +23,30 @@ const { describePmxConversionFailure, resolvePmxConverter, validatePmxSource, in
 };
 
 describe('PMX conversion boundary', () => {
+  it('does not allocate or launch an already canceled conversion',async()=>{
+    const {convertPmxToVrm}=require('../electron/pmx-converter.cjs');const controller=new AbortController();controller.abort();
+    await expect(convertPmxToVrm({sourcePath:'missing.pmx',signal:controller.signal})).rejects.toMatchObject({code:'IMPORT_CANCELED'});
+  });
+  it('terminates the owned conversion, waits for closure, cleans partial reports and never retries cancellation',async()=>{
+    const directory=fs.mkdtempSync(path.join(os.tmpdir(),'yachiyo-convert-abort-'));
+    try{
+      const sourcePath=path.join(directory,'model.pmx'),outputPath=path.join(directory,'model.vrm'),reportPath=path.join(directory,'report.json');
+      fs.writeFileSync(sourcePath,Buffer.concat([Buffer.from('PMX '),Buffer.alloc(64)]));
+      for(const name of ['mmd_tools','vrm']){const addon=path.join(directory,'extensions/blender_org',name);fs.mkdirSync(addon,{recursive:true});for(const file of ['__init__.py','blender_manifest.toml'])fs.writeFileSync(path.join(addon,file),'');}
+      let launches=0,killed=false,closed=false;const controller=new AbortController();
+      const spawn=(_file:string,args:string[])=>{
+        launches++;const attempt=args[args.indexOf('--')+3];fs.writeFileSync(attempt+'.tmp','partial');
+        const child=Object.assign(new EventEmitter(),{stdout:new EventEmitter(),stderr:new EventEmitter(),kill(){killed=true;queueMicrotask(()=>{closed=true;child.emit('close',null,'SIGTERM');});}});
+        return child;
+      };
+      const module={exports:{} as any};vm.runInNewContext(fs.readFileSync(path.resolve('electron/pmx-converter.cjs'),'utf8'),{
+        module,exports:module.exports,__dirname:path.resolve('electron'),process,Buffer,setTimeout,clearTimeout,require:(name:string)=>name==='node:child_process'?{spawn}:require(name),
+      });
+      const result=module.exports.convertPmxToVrm({sourcePath,outputPath,reportPath,signal:controller.signal,converter:{blenderPath:'fake',scriptPath:'fake',blenderUserResources:directory}});
+      controller.abort();await expect(result).rejects.toMatchObject({code:'IMPORT_CANCELED'});
+      expect(killed&&closed).toBe(true);expect(launches).toBe(1);expect(fs.readdirSync(directory).some(name=>name.includes('.attempt-'))).toBe(false);
+    }finally{fs.rmSync(directory,{recursive:true,force:true});}
+  });
   it.each(['PASS', 'FAIL'])('recovers a fresh native crash even when an older %s report exists', async (previousResult) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yachiyo-report-retry-'));
     try {

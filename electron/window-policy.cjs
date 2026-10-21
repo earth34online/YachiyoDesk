@@ -2,7 +2,7 @@
 
 // Inspired by AIRI's privileged-window navigation boundary. Keep model/UI
 // content inside this window separate from pages opened in the system browser.
-function protectCompanionWindow(window, shell) {
+function protectCompanionWindow(window, shell, microphoneAllowed = () => false) {
   const contents = window.webContents;
   const openWebLink = raw => {
     try {
@@ -24,10 +24,13 @@ function protectCompanionWindow(window, shell) {
   contents.on('will-redirect', (event, url) => {
     if (url !== contents.getURL()) event.preventDefault();
   });
-  // Camera, microphone, geolocation and renderer notifications are not used
-  // by this local companion. File dialogs and reminders belong to the main process.
-  contents.session.setPermissionCheckHandler(() => false);
-  contents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  // A short-lived grant is created only after the user's recording consent.
+  // Camera/screen capture and unrelated permissions remain denied.
+  contents.session.setPermissionCheckHandler((requester, permission, _origin, details) =>
+    requester === contents && permission === 'media' && details?.mediaType === 'audio' && microphoneAllowed());
+  contents.session.setPermissionRequestHandler((requester, permission, callback, details) => callback(Boolean(
+    requester === contents && permission === 'media' && details?.mediaTypes?.length
+    && details.mediaTypes.every(type => type === 'audio') && microphoneAllowed())));
 }
 
 module.exports = { protectCompanionWindow };

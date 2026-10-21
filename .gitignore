@@ -18,3 +18,5 @@ characters/*/model.*
 characters/*/textures/
 characters/*/texture/
 /md/CURRENT_STATUS.md
+# Local project-owner instructions; excluded from version control.
+/AGENTS.md

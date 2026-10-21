@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
 import type { MotionProfile, ReactionName } from './types';
+import { ArmContactSurface } from './armContactSurface';
+import { HeadContactSurface } from './headContactSurface';
 
 type Pose = Record<string, { rotation?: number[]; position?: number[] }>;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -41,12 +43,14 @@ export class GenericPoseConstraints {
   private readonly hipsRest: THREE.Vector3;
   private readonly legLength: number;
   private readonly footRest = new Map<string, THREE.Quaternion>();
+  private readonly armSurface: ArmContactSurface;
+  private readonly headSurface: HeadContactSurface;
   readonly diagnostics = { calibrated: true, forward: [] as number[], footAnchorError: 0,
     maximumElbowFlexion: 0, handToFaceDistance: 0 };
 
   static create(vrm: VRM, profile: MotionProfile): GenericPoseConstraints | null {
     // The author's Yachiyo poses have a separate contract; keep that path intact.
-    if (profile.profileId !== 'generic-vrm' || !profile.capabilities.includes('pmx-converted')
+    if (profile.profileId !== 'generic-vrm'
       || !vrm.humanoid.getNormalizedBoneNode || !vrm.humanoid.normalizedHumanBonesRoot) return null;
     const required = ['hips', 'head', 'leftUpperLeg', 'leftLowerLeg', 'leftFoot',
       'rightUpperLeg', 'rightLowerLeg', 'rightFoot'];
@@ -82,6 +86,8 @@ export class GenericPoseConstraints {
     this.lateral.crossVectors(UP, this.forward).normalize();
     this.diagnostics.forward = this.forward.toArray();
     this.calibrateFingers();
+    this.armSurface = new ArmContactSurface(vrm,this.legLength);
+    this.headSurface = new HeadContactSurface(vrm);
   }
 
   private node(name: string): THREE.Object3D | null {
@@ -100,6 +106,64 @@ export class GenericPoseConstraints {
     // A small forward rest tilt, calibrated in the normalized rig rather than
     // copied from the author's separate arm convention. Retain side clearance.
     return -0.06 * this.forward.z;
+  }
+
+  idleArmAngle(side: 'left'|'right'): number {
+    const shoulder=this.rest.get(`${side}UpperArm`),elbow=this.rest.get(`${side}LowerArm`),wrist=this.rest.get(`${side}Hand`);
+    if(!shoulder||!elbow||!wrist)return Math.PI/2;
+    const length=shoulder.distanceTo(elbow)+elbow.distanceTo(wrist);
+    const index=this.rest.get(`${side}IndexProximal`),little=this.rest.get(`${side}LittleProximal`);
+    const palm=index&&little?index.distanceTo(little):length*.08;
+    // Gravity defines the neutral direction. Leave palm-width clearance for
+    // a soft elbow, then solve actual body/clothing contact independently.
+    return Math.atan2(length,palm*.5);
+  }
+
+  constrainExternalArms(garment: {leftRadius:number;rightRadius:number;frontDepth:number;backDepth:number;height:number} | null): void {
+    if(!garment && !this.armSurface.available) return;
+    this.root.updateWorldMatrix(true,true);
+    const hips=this.point(this.node('hips')!), pose=this.vrm.humanoid.getNormalizedPose() as Pose;
+    for(const side of ['left','right'] as const){
+      const upper=`${side}UpperArm`,lower=`${side}LowerArm`,hand=`${side}Hand`;
+      if(!this.node(upper)||!this.node(lower)||!this.node(hand))continue;
+      const target=this.point(this.node(hand)!),relative=target.clone().sub(hips);
+      if(this.armSurface.available){
+        const sign=this.rest.get(hand)!.clone().sub(this.hipsRest).dot(this.lateral)>=0?1:-1;
+        const index=this.rest.get(`${side}IndexProximal`),little=this.rest.get(`${side}LittleProximal`);
+        const radius=index&&little?index.distanceTo(little)*.5:this.legLength*.025;
+        const armLength=this.length(upper,lower)+this.length(lower,hand);
+        const offsets=['IndexProximal','IndexDistal','MiddleDistal','LittleDistal','ThumbDistal'].flatMap(part=>{
+          const bone=this.node(`${side}${part}`);return bone?[this.point(bone).sub(target)]:[];
+        });
+        const resolved=this.armSurface.resolve(target,this.point(this.node(upper)!),this.forward,this.lateral,sign,radius+this.legLength*.008,armLength,offsets);
+        if(resolved.distanceToSquared(target)>1e-12){
+          const orientation=this.orientation(this.node(hand)!);
+          target.copy(resolved);
+          const pole=this.point(this.node(lower)!).sub(this.point(this.node(upper)!)).addScaledVector(this.forward,this.legLength*.12);
+          this.solve(pose,upper,lower,hand,target,pole,2.5);
+          this.orient(pose,hand,orientation);
+        }
+        continue;
+      }
+      if(!garment)continue;
+      // Retarget only contact inside the garment's measured lower-body volume.
+      // Raised gestures, reaching forward, and the source wrist orientation remain free.
+      if(relative.y>garment.height*.06 || relative.y < -this.legLength*.65)continue;
+      const depth=relative.dot(this.forward),limit=(depth>=0?garment.frontDepth:garment.backDepth)+garment.height*.025;
+      if(Math.abs(depth)>=limit || limit<=0)continue;
+      const sign=this.rest.get(hand)!.clone().sub(this.hipsRest).dot(this.lateral)>=0?1:-1;
+      const radius=garment[side==='left'?'leftRadius':'rightRadius'];
+      const minimum=radius*Math.sqrt(Math.max(0,1-(depth/limit)**2))+garment.height*.035;
+      const distance=relative.dot(this.lateral)*sign;
+      if(distance>=minimum)continue;
+      const entry=1-THREE.MathUtils.smoothstep(relative.y,garment.height*-.02,garment.height*.06);
+      const exit=THREE.MathUtils.smoothstep(relative.y,-this.legLength*.65,-this.legLength*.55);
+      target.addScaledVector(this.lateral,(minimum-distance)*sign*entry*exit);
+      const orientation=this.orientation(this.node(hand)!);
+      const pole=this.point(this.node(lower)!).sub(this.point(this.node(upper)!)).addScaledVector(this.forward,this.legLength*.12);
+      this.solve(pose,upper,lower,hand,target,pole,2.5);
+      this.orient(pose,hand,orientation);
+    }
   }
 
   private calibrateFingers(): void {
@@ -229,6 +293,13 @@ export class GenericPoseConstraints {
       const target = this.point(this.node('rightHand')!).lerp(face, active);
       const pole = shoulder.clone().sub(head).setY(-armLength).addScaledVector(this.forward, armLength * .4);
       this.solve(pose, 'rightUpperArm', 'rightLowerArm', 'rightHand', target, pole, THREE.MathUtils.degToRad(140));
+      // Retain the gesture's wrist orientation while meeting the measured
+      // head/hair surface, rather than putting every avatar's hand inside a
+      // fixed skeleton-relative face point.
+      const contactHand = this.node('rightHand')!, orientation = this.orientation(contactHand);
+      const resolved = this.headSurface.resolve(this.point(contactHand), this.forward);
+      this.solve(pose, 'rightUpperArm', 'rightLowerArm', 'rightHand', resolved, pole, THREE.MathUtils.degToRad(140));
+      this.orient(pose, 'rightHand', orientation);
       const elbow = this.point(this.node('rightLowerArm')!), hand = this.point(this.node('rightHand')!);
       this.diagnostics.maximumElbowFlexion = shoulder.clone().sub(elbow).negate().angleTo(hand.clone().sub(elbow));
       this.diagnostics.handToFaceDistance = hand.distanceTo(face);

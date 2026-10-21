@@ -62,7 +62,7 @@ describe('main-process settings validation', () => {
       const migrated = new SettingsStore(legacyPath).get();
       expect(migrated.zoom).toBe(0.35);
       expect(migrated.window).toBeNull();
-      expect(JSON.parse(fs.readFileSync(legacyPath, 'utf8')).schemaVersion).toBe(15);
+      expect(JSON.parse(fs.readFileSync(legacyPath, 'utf8')).schemaVersion).toBe(16);
 
       const previousDefaultPath = path.join(directory, 'v3-default.json');
       fs.writeFileSync(previousDefaultPath, JSON.stringify({ schemaVersion: 3, zoom: 0.82 }), 'utf8');
@@ -125,7 +125,7 @@ describe('main-process settings validation', () => {
       const disabledPreviousProfilePath = path.join(directory, 'v14-autostart.json');
       fs.writeFileSync(disabledPreviousProfilePath, JSON.stringify({ schemaVersion: 14, autoStart: false }), 'utf8');
       const restoredProfile = new SettingsStore(disabledPreviousProfilePath).get();
-      expect(restoredProfile.schemaVersion).toBe(15);
+      expect(restoredProfile.schemaVersion).toBe(16);
       expect(restoredProfile.autoStart).toBe(false);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });

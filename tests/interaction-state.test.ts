@@ -18,7 +18,8 @@ function harness() {
     setInteractionPanelOpen: vi.fn(), beginWindowDrag: vi.fn(), endWindowDrag: vi.fn(), updateWindowDrag: vi.fn() };
   vi.stubGlobal('window', { addEventListener: (name: string, handler: (event: any) => void) => handlers.set(name, handler),
     setTimeout, clearTimeout, yachiyoDesk: api });
-  vi.stubGlobal('document', { body: { classList } });
+  vi.stubGlobal('document', { body: { classList, dataset: {} }, querySelector: vi.fn().mockReturnValue(null) });
+  vi.stubGlobal('HTMLElement', class {});
   vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
   vi.stubGlobal('cancelAnimationFrame', clearTimeout);
   // Use the real UI state transitions with inert visual elements. Rendering

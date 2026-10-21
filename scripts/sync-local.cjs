@@ -10,11 +10,11 @@ function sharedFiles(source) {
       if (entry.name === '__pycache__') continue;
       const filename = path.join(relative, entry.name);
       if (entry.isDirectory()) collect(filename);
-      else if (/\.(ts|css|cjs|mjs|py|json|ps1)$/.test(entry.name)
+      else if (/\.(ts|css|cjs|mjs|py|json|ps1|md|yaml|vrma)$/.test(entry.name)
         || filename === path.join('electron', 'THIRD_PARTY_LICENSES.txt')) files.push(filename);
     }
   };
-  for (const directory of ['src', 'electron', 'tests', 'converter', 'scripts']) collect(directory);
+  for (const directory of ['src', 'electron', 'tests', 'converter', 'scripts', 'skills', 'assets/motions']) collect(directory);
   const documents = path.join(source, 'docs');
   if (fs.existsSync(documents)) for (const entry of fs.readdirSync(documents, { withFileTypes: true })) {
     if (entry.isFile() && entry.name.endsWith('.md')) files.push(path.join('docs', entry.name));
@@ -52,8 +52,11 @@ function planSync(source, target) {
     const filename = path.join(source, document);
     if (fs.existsSync(filename)) for (const alias of aliases) {
       let contents = fs.readFileSync(filename);
-      if (alias === '项目原理与实现详解.md') contents = Buffer.from(contents.toString('utf8')
-        .replace(/\]\((?![a-z][a-z0-9+.-]*:|#|\/)([^)]+)\)/gi, '](docs/$1)'));
+      // Mirrors live outside docs; resolve their relative links from the
+      // destination folder as well (including release/ usage/report copies).
+      const prefix = path.relative(path.dirname(alias), path.dirname(document)).replace(/\\/g, '/');
+      contents = Buffer.from(contents.toString('utf8')
+        .replace(/\]\((?![a-z][a-z0-9+.-]*:|#|\/)([^)]+)\)/gi, `](${prefix}/$1)`));
       entries.push({ file: alias, contents });
     }
   }
