@@ -1,5 +1,8 @@
 # ✦ YachiyoDesk ✦
 
+> 2026-10-23：用户已确认当前运行正常，本版固定为维护基线。运行实现沿用 `1cc9620`，本轮不修改动作、物理或模型；穿模改进等待用户决定是否启动。当前状态见[固定基线记录](docs/BASELINE_20261023.md)。下文较早日期的验证数字与交付过程保留为历史记录。
+
+
 <div align="center">
   <img src="build/icon.png" alt="YachiyoDesk icon" width="128" height="128" />
   <p><strong>让一个高质量 VRM 角色住在你的桌面上</strong></p>
