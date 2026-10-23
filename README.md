@@ -21,7 +21,7 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 2.0 导入预览保留角色已有物理；缺少碰撞配置时，按可识别的身体表面和通用骨骼补基础接触。可试完整动作与行走，再确认入库；支持使用自己的文字 API 调整受限碰撞参数并重新预览，详见 [陪伴功能](docs/COMPANION_2.0.md)。
 
-当前开发分支为 **2.0.0-beta.1**，基于 1.x 收官版 `1.0.9`。新增使用者自己的 AI 接口、文字与可选语音陪伴、导入修复预览、VRMA 动作收藏和角色创作室。详见 [2.0 使用说明](docs/COMPANION_2.0.md) 与 [开发验收记录](docs/DEVELOPMENT_2.0.md)。历史 [1.x 交付记录](docs/RELEASE_20261020.md) 保留；开发分支不代表已发布的 Release。
+当前公开版本为 **2.0.0-beta.1**，基于 1.x 收官版 `1.0.9`。新增使用者自己的 AI 接口、文字与可选语音陪伴、导入修复预览、VRMA 动作收藏和角色创作室。详见 [2.0 使用说明](docs/COMPANION_2.0.md) 与 [开发验收记录](docs/DEVELOPMENT_2.0.md)。历史 [1.x 交付记录](docs/RELEASE_20261020.md) 保留。便携版、安装版和校验文件见 [v2.0.0-beta.1 Release](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.1)。
 
 > 你可以把它当作一个可扩展的本地角色运行时：模型属于你自己，程序负责加载、动作、交互、窗口和配置。
 

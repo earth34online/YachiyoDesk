@@ -17,13 +17,13 @@ F:\create\YachiyoDesk\release\2.0.0-beta.1\win-unpacked\YachiyoDesk.exe
 
 2026-10-21 已将桌面“YachiyoDesk - 八千代”快捷方式和实际运行入口统一到上述程序，按包内容及进程路径核对；开机启动维持用户已有选择。旧程序删除被自动审批拒绝，文件暂留，但日常入口不再指向旧版。
 
-此前仅更新 UI 的阶段已结束，当前从统一共享源码构建。校服接缝、上袖边缘和思考手部避让随运行程序更新，不要求替换原模型。本机当前人物已完整验证源 PMX 的位置、UV 和绑定对应，并以新的双哈希记录关联原始物理；原 VRM 字节不变，角色资料修改前另存备份。来源不明的其他旧导入仍保留回退，不借用未核实物理。新导入的基础碰撞补全与 API 参数调整均在真实预览中检查。旧 Portable/Setup 未重建，不作为最新入口；当前包核验和实际进程见 [审查记录](REVIEW_20261021.md)。
+此前仅更新 UI 的阶段已结束，当前从统一共享源码构建。校服接缝、上袖边缘和思考手部避让随运行程序更新，不要求替换原模型。本机当前人物已完整验证源 PMX 的位置、UV 和绑定对应，并以新的双哈希记录关联原始物理；原 VRM 字节不变，角色资料修改前另存备份。来源不明的其他旧导入仍保留回退，不借用未核实物理。新导入的基础碰撞补全与 API 参数调整均在真实预览中检查。2026-10-23 按最新授权从同一固定实现重新构建公开 Portable/Setup；公开下载见[发布说明](RELEASE_20261023.md)，本机日常解包入口保持不变。
 
-公开版现有便携版和安装包位于以下路径；2026-10-21 UI 收尾时重新封装遇到下载超时，因此这两份文件仍是此前构建，不包含本次 UI 精简。当前 UI 请使用上述桌面解包程序：
+本次公开便携版、安装版及 SHA256SUMS.txt 位于以下目录；它们不包含角色模型，本机日常程序继续使用上面的固定解包入口：
 
 ```text
-F:\create\YachiyoDesk-public\release\2.0.0-beta.1\YachiyoDesk-2.0.0-beta.1-x64-Portable.exe
-F:\create\YachiyoDesk-public\release\2.0.0-beta.1\YachiyoDesk-2.0.0-beta.1-x64-Setup.exe
+F:\create\YachiyoDesk-public\release\2.0.0-beta.1\publish\YachiyoDesk-2.0.0-beta.1-x64-Portable.exe
+F:\create\YachiyoDesk-public\release\2.0.0-beta.1\publish\YachiyoDesk-2.0.0-beta.1-x64-Setup.exe
 ```
 
 ## 常用操作
