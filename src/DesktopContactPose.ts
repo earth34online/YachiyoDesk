@@ -3,7 +3,7 @@ import { VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
 import { solveTwoLink } from './genericPoseConstraints';
 
 export interface DesktopContactState {
-  phase: 'idle' | 'fall' | 'land' | 'edge';
+  phase: 'idle' | 'fall' | 'land' | 'edge' | 'sit' | 'rise';
   impact?: number;
   direction?: -1 | 1;
   wall?: boolean;
@@ -41,7 +41,7 @@ export class DesktopContactPose {
       .reduce((sum,key) => sum + (this.lengths.get(key) || 0), 0) / 2;
   }
   set(state: DesktopContactState): void {
-    if (!['idle','fall','land','edge'].includes(state.phase)) return;
+    if (!['idle','fall','land','edge','sit','rise'].includes(state.phase)) return;
     this.state = { ...state, impact: THREE.MathUtils.clamp(Number(state.impact) || 0,0,1), direction: state.direction === -1 ? -1 : 1 };
     this.elapsed = 0;
     if (state.phase === 'idle') this.compression = 0;
@@ -74,6 +74,9 @@ export class DesktopContactPose {
     this.diagnostics.phase = this.state.phase; this.diagnostics.footError = 0; this.diagnostics.handReachError = 0;
     if (!this.active || this.legLength < 1e-5) return;
     const phase = this.state.phase;
+    // Authored VRMA owns the whole seated pose. This overlay only retains the
+    // contact state; applying standing leg IK would undo the sitting action.
+    if (phase === 'sit' || phase === 'rise') return;
     const duration = phase === 'land' ? 1 : 1.3;
     const progress = Math.min(1,this.elapsed / duration);
     const weight = Math.sin(progress * Math.PI) ** 2;

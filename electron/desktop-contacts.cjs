@@ -30,7 +30,7 @@ function contactGeometry(bounds, viewport) {
     right: (viewport?.right ?? bounds.width * .6) * scale,
     footLeft: (viewport?.footLeft ?? bounds.width * .48) * scale,
     footRight: (viewport?.footRight ?? bounds.width * .52) * scale,
-    footY: (viewport?.footY ?? bounds.height - 2) * verticalScale,
+    footY: (viewport?.supportY ?? viewport?.footY ?? bounds.height - 2) * verticalScale,
     height: Math.max(1, (viewport?.avatarHeight ?? bounds.height * .35) * verticalScale),
   };
 }
@@ -42,7 +42,7 @@ function selectSupport(platforms, bounds, geometry, fromY, toY) {
 }
 
 class DesktopContacts {
-  constructor(host) { this.host = host; this.windows = []; this.support = null; this.fall = null; this.timer = null; this.reactionUntil = 0; this.last = 0; }
+  constructor(host) { this.host = host; this.windows = []; this.support = null; this.fall = null; this.resting = false; this.timer = null; this.reactionUntil = 0; this.last = 0; }
   geometry() { return contactGeometry(this.host.bounds(), this.host.viewport()); }
   platforms() {
     const area = this.host.area();
@@ -119,18 +119,30 @@ class DesktopContacts {
     return { minimumX: Math.ceil(this.support.left - geometry.footLeft), maximumX: Math.floor(this.support.right - geometry.footRight) };
   }
   floorY() { return this.support && this.enabled() ? this.support.y - this.geometry().footY : null; }
-  busy() { return Boolean(this.fall) || this.host.now() < this.reactionUntil; }
+  restOnWindow() {
+    if (!this.enabled() || !this.host.settings().windowContacts || this.fall || !this.support || this.support.id === 'screen') return false;
+    if (!this.resting && Number.isFinite(this.host.viewport()?.supportY)) return false;
+    if (!this.resting) { this.resting = true; this.command('sit'); }
+    return true;
+  }
+  busy() { return this.resting || Boolean(this.fall) || this.host.now() < this.reactionUntil; }
   edge(direction) {
     if (!this.enabled()) return;
     this.reactionUntil = this.host.now() + 1300;
     this.command('edge', { direction, wall: this.support?.id === 'screen' || !this.support });
   }
   interruptReaction() {
+    if (this.resting) {
+      this.resting = false;
+      this.reactionUntil = this.host.now() + 1500;
+      this.command('rise');
+      return;
+    }
     this.reactionUntil = 0;
     if (!this.fall) this.command('idle');
   }
   cancel(clearSupport = true) {
-    clearInterval(this.timer); this.timer = null; this.fall = null; this.reactionUntil = 0;
+    clearInterval(this.timer); this.timer = null; this.fall = null; this.resting = false; this.reactionUntil = 0;
     if (clearSupport) this.support = null;
     this.command('idle');
   }

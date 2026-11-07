@@ -568,7 +568,7 @@ function sanitizeAvatarViewportBounds(value) {
   if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(canvasWidth)) return null;
   if (canvasWidth <= 0 || left < 0 || right <= left || right > canvasWidth) return null;
   const extra = {};
-  for (const key of ['canvasHeight','footY','footLeft','footRight','avatarHeight']) {
+  for (const key of ['canvasHeight','footY','supportY','footLeft','footRight','avatarHeight']) {
     if (typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0) extra[key] = value[key];
   }
   return { left, right, canvasWidth, ...extra };
@@ -1631,6 +1631,16 @@ function bindIpc() {
   ipcMain.on('window:drag-end', (_event, point) => updateWindowDrag(point, true));
   ipcMain.on('autonomy:activity', () => noteUserActivity());
   ipcMain.on('autonomy:panel', (_event, open) => setInteractionPanelOpen(open));
+  ipcMain.handle('desktop:window-rest', () => {
+    lastUserActivityAt = Date.now();
+    clearTimeout(autonomyTimer);
+    autonomyTimer = null;
+    if (!desktopContacts?.restOnWindow()) {
+      return { ok: false, error: '请先开启窗口边缘互动，并把角色拖放到一个可见窗口的顶边。' };
+    }
+    stopAutonomousMovement(false);
+    return { ok: true };
+  });
 
   ipcMain.on('window:context-menu', () => showContextMenu());
   ipcMain.handle('window:reset', () => resetWindowPosition());

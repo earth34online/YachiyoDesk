@@ -18,6 +18,7 @@ interface UiHost {
   rotate(radians: number): void;
   restoreView(): void;
   settingsPatch(patch: Partial<AppSettings>): Promise<void>;
+  closeWorkspace(): void;
 }
 
 export class CompanionUI {
@@ -42,6 +43,8 @@ export class CompanionUI {
   private stopButton!: HTMLButtonElement;
   private removeEvents: () => void;
   private initialized = false;
+  private disposed = false;
+  private readonly motionConfiguration: Promise<void>;
   private connectionPromptOpen = false;
   private playlistTimer = 0;
   private playlist = false;
@@ -58,6 +61,20 @@ export class CompanionUI {
     this.removeEvents = window.yachiyoDesk.onCompanionEvent(event => this.onEvent(event));
     this.buildChat(); this.buildStudio();
     if(host.bootstrap.character.motionProfile.profileId==='generic-vrm')void call<ArrayBuffer>('motion.load',{id:'builtin-airi-idle'}).then(bytes=>host.runtime.configureNaturalIdle(bytes)).catch(error=>this.report(error));
+    this.motionConfiguration = this.configureGestureMotions();
+    void this.motionConfiguration.catch(error => this.report(error));
+  }
+  private async configureGestureMotions(): Promise<void> {
+    const motions = await call<MotionItem[]>('motions');
+    await Promise.all(motions.filter(item => item.builtin && item.reaction
+      && this.host.bootstrap.character.motionProfile.profileId === 'generic-vrm').map(async item => {
+      const bytes = await call<ArrayBuffer>('motion.load', { id: item.id });
+      if (!this.disposed) this.host.runtime.configureReactionMotion(item.reaction!, bytes, item.name);
+    }));
+    await Promise.all((['enter', 'idle', 'exit'] as const).map(async kind => {
+      const bytes = await call<ArrayBuffer>('motion.load', { id: `builtin-window-${kind}` });
+      if (!this.disposed) this.host.runtime.configureWindowRestMotion(kind, bytes, '窗口边缘休息');
+    }));
   }
   updateSettings(settings: AppSettings): void {
     if(this.naturalToggle)this.naturalToggle.checked=settings.naturalIdle;
@@ -344,7 +361,7 @@ export class CompanionUI {
   }
   private buildStudio(): void {
     this.studio.append(element('h2', '角色创作室'), element('p', '收藏动作、观察模型，记录属于你的桌面时刻。', 'workspace-hint'));
-    const motionList = element('div'), loop = this.input('循环播放', '', 'checkbox');
+    const motionList = element('div'), loop = this.input('循环动画文件', '', 'checkbox');
     const natural=this.input('自然待机 · AIRI 动画','','checkbox');this.naturalToggle=natural.field;natural.field.checked=this.host.bootstrap.settings.naturalIdle;
     natural.field.disabled=this.host.bootstrap.character.motionProfile.profileId!=='generic-vrm';
     natural.field.addEventListener('change',()=>{void this.host.settingsPatch({naturalIdle:natural.field.checked}).catch(error=>{natural.field.checked=!natural.field.checked;this.report(error);});});
@@ -355,17 +372,32 @@ export class CompanionUI {
     };
     const random = this.input('随机动作播放列表', '', 'checkbox');
     random.field.addEventListener('change', () => { this.playlist = random.field.checked; if (this.playlist) this.schedulePlaylist(); else clearTimeout(this.playlistTimer); });
-    const motions = this.details('✦ 动作收藏', natural.node, this.row(this.button('导入 VRMA', async () => { if (await call('motion.import')) await refresh(); }), this.button('刷新', refresh), this.button('停止动作', () => {this.playlist=false;random.field.checked=false;clearTimeout(this.playlistTimer);this.host.runtime.stopMotion();})), loop.node, random.node, motionList);
+    const motions = this.details('✦ 动作收藏', natural.node, this.row(this.button('导入 VRMA', async () => { if (await call('motion.import')) await refresh(); }), this.button('刷新', refresh), this.button('停止动作', () => {this.playlist=false;random.field.checked=false;clearTimeout(this.playlistTimer);window.yachiyoDesk.noteUserActivity();this.host.runtime.stopMotion();})), loop.node, random.node, motionList);
     motions.addEventListener('toggle', () => { if (motions.open) void refresh().catch(error => this.report(error)); });
     this.studio.append(motions, this.observationPanel(), this.snapshotPanel(), this.postcardPanel(), this.scenePanel());
   }
-  private async playMotion(motion: MotionItem, loop = false): Promise<void> {this.interruptScene();window.yachiyoDesk.noteUserActivity(); const bytes = await call<ArrayBuffer>('motion.load', { id: motion.id }); await this.host.runtime.playMotion(bytes, motion.name, loop); this.host.toast(`正在播放：${motion.name}`); }
+  private async playMotion(motion: MotionItem, loop = false): Promise<void> {
+    this.interruptScene();
+    window.yachiyoDesk.noteUserActivity();
+    if (motion.interaction === 'window-rest') {
+        await this.motionConfiguration;
+      this.host.closeWorkspace();
+      const result = await window.yachiyoDesk.restOnWindow();
+      if (!result.ok) throw new Error(result.error);
+      } else if (motion.action || (motion.reaction && !loop && this.host.bootstrap.character.motionProfile.profileId === 'generic-vrm')) {
+        this.localReaction((motion.action || motion.reaction)!);
+    } else {
+      const bytes = await call<ArrayBuffer>('motion.load', { id: motion.id });
+      await this.host.runtime.playMotion(bytes, motion.name, loop, { preserveHipsHeight: motion.builtin === true });
+    }
+    this.host.toast(`正在播放：${motion.name}`);
+  }
   private localReaction(action:ReactionName):void{window.yachiyoDesk.noteUserActivity();this.host.runtime.triggerReaction(action);}
   private schedulePlaylist(): void {
     clearTimeout(this.playlistTimer);
     this.playlistTimer = window.setTimeout(() => {
       void (async () => { if (!this.playlist || document.hidden) return; if (this.host.runtime.canPlayLibraryMotion) {
-        const items = await call<MotionItem[]>('motions'); if (items.length) await this.playMotion(items[Math.floor(Math.random() * items.length)]);
+        const items = (await call<MotionItem[]>('motions')).filter(item => !item.interaction); if (items.length) await this.playMotion(items[Math.floor(Math.random() * items.length)]);
       } })().catch(error => { this.playlist = false; this.report(error); }).finally(() => { if (this.playlist) this.schedulePlaylist(); });
     }, 12000);
   }
@@ -452,5 +484,5 @@ export class CompanionUI {
       }), this.button('关闭提醒', () => { clearInterval(this.reminderTimer); this.reminderTimer = 0; state.textContent = '提醒已关闭'; })), state);
     return box;
   }
-  dispose(): void { ++this.readGeneration; ++this.sessionRevision; this.autoRead=false; this.removeEvents(); this.voice.dispose(); this.playlist = false; clearTimeout(this.playlistTimer); clearInterval(this.reminderTimer);this.interruptScene(); void call('cancel'); }
+  dispose(): void { this.disposed = true; ++this.readGeneration; ++this.sessionRevision; this.autoRead=false; this.removeEvents(); this.voice.dispose(); this.playlist = false; clearTimeout(this.playlistTimer); clearInterval(this.reminderTimer);this.interruptScene(); void call('cancel'); }
 }

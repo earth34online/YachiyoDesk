@@ -98,6 +98,7 @@ if (initializedRuntime) {
     rotate: radians => runtime.setSettings({ ...currentSettings, rotationY: radians }),
     restoreView: () => runtime.setSettings(currentSettings),
     settingsPatch: applySettingsPatch,
+    closeWorkspace: () => ui.hideSettings(),
   });
   const interruptScene = (): void => companion.interruptScene();
   canvas.addEventListener('pointerdown',interruptScene);
@@ -119,12 +120,13 @@ if (initializedRuntime) {
       __desktopPetViewportBounds: () => runtime.avatarViewportBounds(),
       __desktopPetPerformance: () => runtime.getPerformanceStats(),
       __desktopPetBindPose: (active: boolean) => runtime.setDiagnosticBindPose(active),
-      __desktopPetPlayMotion: (bytes: number[], loop: boolean) => runtime.playMotion(new Uint8Array(bytes).buffer, 'Runtime verification', loop),
+      __desktopPetPlayMotion: (bytes: number[], loop: boolean, options?: import('./MotionPlayer').MotionPlaybackOptions) => runtime.playMotion(new Uint8Array(bytes).buffer, 'Runtime verification', loop, options),
       __desktopPetStopMotion: () => runtime.stopMotion(),
       __desktopPetMotionPlaying: () => runtime.motionPlaying,
       __desktopPetTriggerReaction: (reaction: ReactionName) => runtime.triggerReaction(reaction),
       __desktopPetContact: (state: import('./DesktopContactPose').DesktopContactState) => runtime.setDesktopContact(state),
       __desktopPetContactSnapshot: () => runtime.desktopContactSnapshot(),
+      __desktopPetRotate: (radians: number) => runtime.setRotation(radians),
     });
   }
 

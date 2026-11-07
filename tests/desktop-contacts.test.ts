@@ -8,7 +8,7 @@ afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 function harness() {
   let bounds = {x:150,y:100,width:560,height:840}, active = true;
   const settings = {desktopContacts:true,windowContacts:true,lockPosition:false};
-  const viewport = {left:230,right:330,canvasWidth:560,canvasHeight:840,footY:838,footLeft:265,footRight:295,avatarHeight:280};
+  const viewport = {left:230,right:330,canvasWidth:560,canvasHeight:840,footY:838,footLeft:265,footRight:295,avatarHeight:280,supportY:undefined as number|undefined};
   const area = {x:0,y:0,width:1920,height:1080};
   const command = vi.fn(), settled = vi.fn();
   const contact = new DesktopContacts({bounds:()=>({...bounds}),viewport:()=>viewport,settings:()=>settings,
@@ -46,6 +46,36 @@ describe('desktop contact contracts',()=>{
     expect(h.bounds.x).toBe(210);expect(h.bounds.y+838).toBe(680);
     h.contact.updateWindows([{id:'cover',x:100,y:200,width:1000,height:700},{id:'app',x:160,y:680,width:1000,height:300}]);
     expect(h.contact.fall).not.toBeNull();vi.advanceTimersByTime(2000);expect(h.bounds.y+838).toBe(1080);
+  });
+  it('rests on an external support, follows the seated anchor and allows time to rise before walking',()=>{
+    const h=harness();h.setBounds({y:-400});h.contact.updateWindows([{id:'app',x:100,y:600,width:1000,height:400}]);
+    h.contact.drop();vi.advanceTimersByTime(1200);
+    expect(h.contact.restOnWindow()).toBe(true);expect(h.contact.resting).toBe(true);
+    expect(h.command).toHaveBeenLastCalledWith({phase:'sit'});vi.advanceTimersByTime(5000);expect(h.contact.busy()).toBe(true);
+    const calls=h.command.mock.calls.length;expect(h.contact.restOnWindow()).toBe(true);expect(h.command.mock.calls).toHaveLength(calls);
+    h.viewport.supportY=690;h.contact.updateWindows([{id:'app',x:160,y:680,width:1000,height:300}]);
+    expect(h.bounds.x).toBe(210);expect(h.bounds.y+690).toBe(680);expect(h.contact.floorY()).toBe(-10);
+    expect(h.contact.geometry()).toMatchObject({footLeft:265,footRight:295,footY:690});
+    expect(contactGeometry({width:280,height:420},h.viewport).footY).toBe(345);
+    h.contact.interruptReaction();expect(h.contact.resting).toBe(false);expect(h.command).toHaveBeenLastCalledWith({phase:'rise'});
+    expect(h.contact.busy()).toBe(true);vi.advanceTimersByTime(1500);expect(h.contact.busy()).toBe(false);expect(h.contact.support.id).toBe('app');
+  });
+  it('refuses unsupported or disabled window rest and clears rest on lost support, drag or cancellation',()=>{
+    const h=harness();expect(h.contact.restOnWindow()).toBe(false);
+    h.setBounds({y:-400});h.contact.updateWindows([{id:'app',x:100,y:600,width:1000,height:400}]);h.contact.drop();
+    expect(h.contact.restOnWindow()).toBe(false);vi.advanceTimersByTime(1200);
+    h.pause(true);expect(h.contact.restOnWindow()).toBe(false);h.pause(false);
+    h.settings.lockPosition=true;expect(h.contact.restOnWindow()).toBe(false);h.settings.lockPosition=false;
+    h.settings.desktopContacts=false;expect(h.contact.restOnWindow()).toBe(false);h.settings.desktopContacts=true;
+    h.settings.windowContacts=false;expect(h.contact.restOnWindow()).toBe(false);h.settings.windowContacts=true;
+    expect(h.contact.restOnWindow()).toBe(true);h.contact.updateWindows([]);
+    expect(h.contact.resting).toBe(false);expect(h.contact.support).toBeNull();expect(h.contact.fall).not.toBeNull();
+    expect(h.command).toHaveBeenLastCalledWith({phase:'fall'});vi.advanceTimersByTime(2000);
+    expect(h.contact.support.id).toBe('screen');expect(h.contact.restOnWindow()).toBe(false);
+    h.setBounds({y:-400});h.contact.updateWindows([{id:'app',x:100,y:600,width:1000,height:400}]);h.contact.drop();vi.advanceTimersByTime(1200);
+    h.contact.restOnWindow();h.contact.drop();expect(h.contact.resting).toBe(false);h.contact.cancel();
+    expect(h.contact.busy()).toBe(false);expect(h.contact.resting).toBe(false);expect(vi.getTimerCount()).toBe(0);
+    expect(h.command).toHaveBeenLastCalledWith({phase:'idle'});
   });
   it('uses foot span rather than transparent window width for platform patrol range',()=>{
     const h=harness();h.setBounds({y:-400});h.contact.updateWindows([{id:'app',x:400,y:600,width:100,height:300}]);

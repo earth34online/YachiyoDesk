@@ -54,4 +54,13 @@ describe('shared desktop and public source synchronization', () => {
     const other = path.join(path.dirname(target), 'Other'); fs.mkdirSync(other);
     expect(() => planSync(source, other)).toThrow('sibling');
   });
+  it('keeps animation attribution and license texts with their shared runtime assets', () => {
+    const { source, target } = fixture();
+    const motions = path.join(source, 'assets', 'motions'); fs.mkdirSync(motions, { recursive: true });
+    fs.writeFileSync(path.join(motions, 'quaternius-LICENSE.txt'), 'CC0 1.0');
+    fs.writeFileSync(path.join(motions, 'quaternius-retarget-NOTICE.txt'), 'MIT retarget attribution');
+    applySync(planSync(source, target));
+    expect(fs.readFileSync(path.join(target, 'assets', 'motions', 'quaternius-LICENSE.txt'), 'utf8')).toBe('CC0 1.0');
+    expect(planSync(source, target).differences).toHaveLength(0);
+  });
 });

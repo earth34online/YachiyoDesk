@@ -54,6 +54,70 @@ describe('independent PMX texture-table repair contract',()=>{
  });
 });
 describe('motion library and snapshots',()=>{
+ it('loads hidden window segments and the retained AIRI idle through the actual host request path',async()=>{
+  const h=host();
+  expect(h.motions.list().some((item:any)=>item.id==='builtin-window-enter')).toBe(false);
+  for(const id of ['builtin-window-enter','builtin-window-idle','builtin-window-exit','builtin-airi-idle']){
+   const bytes=await h.request('motion.load',{id});
+   expect(readGlb(Buffer.from(bytes)).extensions.VRMC_vrm_animation).toBeDefined();
+  }
+  await expect(h.request('motion.load',{id:'missing-motion'})).rejects.toThrow('动作不存在');h.dispose();
+ });
+ it('lists catalog motions in order, resolves their bundled files and protects them during user imports/removal',async()=>{
+  const root=dir(),bundled=path.join(root,'bundled'),owned=path.join(root,'library');fs.mkdirSync(bundled);
+  const entries=[{id:'builtin-wave',file:'wave.vrma',name:'招手',reaction:'greet'},{id:'builtin-bow',file:'bow.vrma',name:'鞠躬',reaction:'bow'}];
+  for(const entry of entries)fs.copyFileSync(path.resolve('assets/motions/airi-idle.vrma'),path.join(bundled,entry.file));
+  fs.writeFileSync(path.join(bundled,'catalog.json'),JSON.stringify({version:1,items:[...entries,{id:'builtin-missing',file:'missing.vrma',name:'未安装'}]}));
+  const library=new MotionLibrary(owned,bundled);
+  expect(library.list()).toEqual(entries.map(({file,...entry})=>({...entry,builtin:true})));
+  expect(library.file('builtin-bow')).toBe(path.join(bundled,'bow.vrma'));
+  for(const id of ['builtin-wave','builtin-bow','builtin-missing'])expect(()=>library.remove(id)).toThrow('内置');
+  expect(fs.existsSync(path.join(owned,'library.json'))).toBe(false);
+  const source=path.join(bundled,'wave.vrma'),item=await library.import(source);
+  expect((await library.import(source)).id).toBe(item.id);expect(library.list()).toHaveLength(3);
+  expect(JSON.parse(fs.readFileSync(path.join(owned,'library.json'),'utf8')).items).toEqual([item]);
+  expect(library.remove(item.id)).toHaveLength(2);expect(fs.existsSync(library.file(item.id))).toBe(false);
+  expect(fs.existsSync(source)).toBe(true);
+ });
+ it('keeps the AIRI fallback without a catalog and lets an explicit catalog replace that fallback',()=>{
+  const root=dir(),bundled=path.join(root,'bundled');fs.mkdirSync(bundled);
+  const library=new MotionLibrary(path.join(root,'library'),bundled),file=path.join(bundled,'airi-idle.vrma');
+  expect(library.list()).toEqual([]);fs.writeFileSync(file,'fixture');
+  expect(library.list()).toEqual([{id:'builtin-airi-idle',name:'AIRI 自然待机',builtin:true}]);
+  expect(library.file('builtin-airi-idle')).toBe(file);expect(()=>library.remove('builtin-airi-idle')).toThrow('内置');
+  fs.writeFileSync(path.join(bundled,'catalog.json'),JSON.stringify({version:1,items:[]}));expect(library.list()).toEqual([]);
+  expect(library.file('builtin-airi-idle')).toBe(file);expect(()=>library.remove('builtin-airi-idle')).toThrow('内置');
+ });
+ it('lists program gestures beside VRMA entries without requiring files and protects their removal',()=>{
+  const root=dir(),library=new MotionLibrary(path.join(root,'library'),root);
+  const gesture={id:'builtin-greet',name:'招手',action:'greet'},motion={id:'builtin-dance',name:'舞蹈',file:'dance.vrma',reaction:'dance'};
+  fs.writeFileSync(path.join(root,'dance.vrma'),'fixture');
+  fs.writeFileSync(path.join(root,'catalog.json'),JSON.stringify({version:1,items:[gesture,motion]}));
+  expect(library.list()).toEqual([{...gesture,builtin:true},{id:motion.id,name:motion.name,reaction:'dance',builtin:true}]);
+  expect(()=>library.file(gesture.id)).toThrow('无需动作文件');expect(()=>library.remove(gesture.id)).toThrow('内置');
+  expect(library.file(motion.id)).toBe(path.join(root,'dance.vrma'));expect(fs.existsSync(path.join(root,'library/library.json'))).toBe(false);
+  for(const item of [{...gesture,file:'dance.vrma'},{...gesture,reaction:'greet'},{id:'builtin-empty',name:'空动作'}]){
+   fs.writeFileSync(path.join(root,'catalog.json'),JSON.stringify({version:1,items:[item]}));expect(()=>library.list()).toThrow('内置');
+  }
+ });
+ it('keeps hidden resources addressable and lists window interactions without motion files',()=>{
+  const root=dir(),library=new MotionLibrary(path.join(root,'library'),root);
+  const hidden={id:'builtin-airi-idle',name:'自然待机',file:'airi-idle.vrma',hidden:true},interaction={id:'builtin-window-rest',name:'窗口边休息',interaction:'window-rest'};
+  fs.writeFileSync(path.join(root,'airi-idle.vrma'),'fixture');
+  fs.writeFileSync(path.join(root,'catalog.json'),JSON.stringify({version:1,items:[hidden,interaction]}));
+  expect(library.list()).toEqual([{...interaction,builtin:true}]);expect(library.file(hidden.id)).toBe(path.join(root,hidden.file));
+  expect(()=>library.file(interaction.id)).toThrow('窗口互动');
+  for(const id of [hidden.id,interaction.id])expect(()=>library.remove(id)).toThrow('内置');
+  for(const item of [{...interaction,action:'greet'},{...interaction,file:'airi-idle.vrma'},{...interaction,interaction:'unknown'}]){
+   fs.writeFileSync(path.join(root,'catalog.json'),JSON.stringify({version:1,items:[item]}));expect(()=>library.list()).toThrow('内置');
+  }
+ });
+ it('rejects catalog paths outside the resource directory and duplicate bundled ids',()=>{
+  const root=dir(),library=new MotionLibrary(path.join(root,'library'),root),entry={id:'builtin-wave',file:'wave.vrma',name:'招手'};
+  for(const items of [[{...entry,file:'../wave.vrma'}],[{...entry,file:'C:\\wave.vrma'}],[entry,entry]]){
+   fs.writeFileSync(path.join(root,'catalog.json'),JSON.stringify({version:1,items}));expect(()=>library.list()).toThrow('内置');
+  }
+ });
  it('deduplicates owned playable VRMA copies and rejects external resources and fabricated extension declarations',async()=>{
   const root=dir(),library=new MotionLibrary(path.join(root,'library')),file=path.join(root,'wave.vrma');
   const json={asset:{version:'2.0'},nodes:[{}],animations:[{channels:[{}]}],extensions:{VRMC_vrm_animation:{humanoid:{humanBones:{hips:{node:0}}}}}};

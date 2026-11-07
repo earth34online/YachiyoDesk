@@ -1,9 +1,11 @@
 # 当前维护与交付
 
+> 2026-11-07 当前范围：已先完整发布并同步 v2.0.0-beta.2 固定基线，再开展 25 项动作与窗口坐姿扩充。最新要求允许找不到合适免费女主模型时不导入。新增实现、许可及验证以[动作与窗口陪伴](MOTIONS_20261107.md)为准；下文历史记录不代替本轮验收。
+
 > 已发布的 2026-10-23 版本见[固定基线](BASELINE_20261023.md)。2026-11-06 的原生 VRM 动作修复见[模型对照记录](VRM_MOTION_COMPATIBILITY.md)。
 
 
-更新日期：2026-10-21。当前工作区：**2.0.0-beta.1 开发分支**；1.x 标签及交付记录保留。2.0 完成验证及审查前不提交或推送。
+更新日期：2026-11-07。当前工作区：**2.0.0-beta.3 / feat/2.0-companion**；用户已授权核对完成后直接提交、完整 Release 和同步桌面。旧标签保留，保护本地角色与用户设置。
 
 ## 两份项目的职责
 
@@ -38,11 +40,11 @@ npm run verify
 
 ## 构建和程序入口
 
-公开版执行 `npm run dist` 生成便携版和安装版。当前 2.0 维护必须显式使用 `--config.directories.output=release/2.0.0-beta.1`，不再将旧 `release\win-unpacked` 作为桌面入口。
+公开版执行 `npm run dist` 生成便携版和安装版。当前 2.0 维护必须显式使用 `--config.directories.output=release/2.0.0-beta.3`，不再将旧 `release\win-unpacked` 作为桌面入口。
 
-2.0 安装产物使用 `node scripts/package.cjs --win portable nsis --config.directories.output=release/2.0.0-beta.1`；两版解包构建使用同一版本目录的 `--win --dir`。2026-10-21 按用户要求统一共享源码、当前构建、桌面快捷方式及实际进程，再在这一基线上继续修复。旧文件删除已获用户授权，但自动审批两次拒绝，不能声称清理完成或换工具绕过。
+2.0 安装产物使用 `node scripts/package.cjs --win portable nsis --config.directories.output=release/2.0.0-beta.3`；两版解包构建使用同一版本目录的 `--win --dir`。2026-10-21 按用户要求统一共享源码、当前构建、桌面快捷方式及实际进程，再在这一基线上继续修复。旧文件删除已获用户授权，但自动审批两次拒绝，不能声称清理完成或换工具绕过。
 
-当前桌面快捷方式使用 `F:\create\YachiyoDesk\release\2.0.0-beta.1\win-unpacked\YachiyoDesk.exe`。公开版的模型过滤规则保留在构建配置中；本机桌面构建包含本地角色资源。
+当前桌面快捷方式使用 `F:\create\YachiyoDesk\release\2.0.0-beta.3\win-unpacked\YachiyoDesk.exe`。公开版的模型过滤规则保留在构建配置中；本机桌面构建包含本地角色资源。
 
 源码同步与程序打包分别执行。每次程序更新后核对包内版本、核心文件及本地模型哈希。
 
@@ -52,7 +54,7 @@ npm run verify
 
 无模型引导使用 `--onboarding-test`；有模型使用 `--smoke-test`。测试使用隔离配置目录。PMX 动作检查保留真实角色 manifest 和 PMX capability。
 
-2.0 证据保存在 `artifacts/2.0-development-20261020`；历史 1.x 与 1.0.8 证据按原目录保留。2.0 包的 SHA-256 保存到 `release/2.0.0-beta.1/SHA256SUMS.txt`；生成校验文件不代表已经发布 GitHub Release。
+2.0 证据保存在 `artifacts/2.0-development-20261020`；历史 1.x 与 1.0.8 证据按原目录保留。2.0 包的 SHA-256 保存到 `release/2.0.0-beta.3/SHA256SUMS.txt`；生成校验文件不代表已经发布 GitHub Release。
 
 `scripts/check-companion-runtime.cjs` 在隔离配置中验证真实 IPC、HTTP、录音、朗读、动作、快照和导入预览，不使用付费密钥。通过 `YACHIYO_COMPANION_TEST_MODEL` 指定合法本地测试 VRM；`--extended-ui` 实测编排和一分钟提醒，`--pmx-repair` 供具备本机 PMX 测试资源与 Blender 的环境使用。普通 `npm test` 不依赖私有角色模型。
 

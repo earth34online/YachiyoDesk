@@ -27,6 +27,7 @@ declare global {
       endWindowDrag(screenX: number, screenY: number): void;
       noteUserActivity(): void;
       setInteractionPanelOpen(open: boolean): void;
+      restOnWindow(): Promise<{ ok: boolean; error?: string }>;
       showContextMenu(point?: { x: number; y: number }): void;
       resetWindow(): Promise<{ x: number; y: number; width: number; height: number } | null>;
       openDataFolder(): Promise<string>;

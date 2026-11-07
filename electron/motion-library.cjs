@@ -18,14 +18,44 @@ function readGlb(bytes) {
 }
 class MotionLibrary {
   constructor(directory, bundledDirectory) { this.directory = directory; this.bundledDirectory = bundledDirectory; this.index = path.join(directory, 'library.json'); this.epoch = 0; this.workers = new Set(); }
+  bundledItems() {
+    if (!this.bundledDirectory) return [];
+    const catalog = readJson(path.join(this.bundledDirectory, 'catalog.json'), {
+      version: 1, items: [{ id: 'builtin-airi-idle', file: 'airi-idle.vrma', name: 'AIRI 自然待机' }],
+    });
+    if (catalog.version !== 1 || !Array.isArray(catalog.items)) throw new Error('内置动作目录无法识别。');
+    const ids = new Set();
+    return catalog.items.map(item => {
+      const hasFile = typeof item.file === 'string' && /^[^/\\:]+\.vrma$/i.test(item.file);
+      const hasAction = typeof item.action === 'string' && item.action.length > 0;
+      const hasInteraction = item.interaction === 'window-rest';
+      if (!isId(item.id) || !item.id.startsWith('builtin-') || ids.has(item.id)
+        || typeof item.name !== 'string' || !item.name.trim()
+        || item.hidden !== undefined && typeof item.hidden !== 'boolean'
+        || !(hasFile && item.action === undefined && item.interaction === undefined
+          || hasAction && item.file === undefined && item.reaction === undefined && item.interaction === undefined
+          || hasInteraction && item.file === undefined && item.action === undefined && item.reaction === undefined)) throw new Error('内置动作条目无效。');
+      ids.add(item.id);
+      return { ...item, builtin: true };
+    });
+  }
   list() {
     const stored=readJson(this.index, { version: 1, items: [] });
     if(stored.version!==1 || !Array.isArray(stored.items))throw new Error('动作库索引无法识别，原文件已保留。');
-    const items=stored.items.filter(item => isId(item.id) && !item.builtin && fs.existsSync(this.file(item.id)));
-    if(this.bundledDirectory && fs.existsSync(this.file('builtin-airi-idle'))) items.unshift({id:'builtin-airi-idle',name:'AIRI 自然待机',builtin:true});
-    return items;
+    const bundled = this.bundledItems();
+    const items=stored.items.filter(item => isId(item.id) && !item.builtin && !bundled.some(builtin => builtin.id === item.id)
+      && fs.existsSync(path.join(this.directory, `${item.id}.vrma`)));
+    return [...bundled.filter(item => !item.hidden && (item.action || item.interaction || fs.existsSync(path.join(this.bundledDirectory, item.file))))
+      .map(({ file, ...item }) => item), ...items];
   }
-  file(id) { if (!isId(id)) throw new Error('动作标识无效。'); return path.join(id==='builtin-airi-idle' && this.bundledDirectory ? this.bundledDirectory : this.directory, `${id==='builtin-airi-idle' && this.bundledDirectory?'airi-idle':id}.vrma`); }
+  file(id) {
+    if (!isId(id)) throw new Error('动作标识无效。');
+    const builtin = this.bundledItems().find(item => item.id === id);
+    if (builtin?.action) throw new Error('此动作由程序手势播放，无需动作文件。');
+    if (builtin?.interaction) throw new Error('此动作需要桌面窗口互动，无需动作文件。');
+    if (id === 'builtin-airi-idle' && this.bundledDirectory) return path.join(this.bundledDirectory, 'airi-idle.vrma');
+    return builtin ? path.join(this.bundledDirectory, builtin.file) : path.join(this.directory, `${id}.vrma`);
+  }
   async import(filename) {
     const epoch = this.epoch;
     if (fs.statSync(filename).size > 64 * 1024 * 1024) throw new Error('动作文件超过 64 MB。');
@@ -59,6 +89,13 @@ class MotionLibrary {
     return item;
   }
   dispose() { ++this.epoch; for (const worker of this.workers) void worker.terminate(); this.workers.clear(); }
-  remove(id) { if(id==='builtin-airi-idle' && this.bundledDirectory)throw new Error('内置参考动作不能删除，可关闭自然待机。');const items = this.list().filter(item => item.id !== id); writeJson(this.index, { version: 1, items:items.filter(item=>!item.builtin) }); fs.rmSync(this.file(id), { force: true }); return items; }
+  remove(id) {
+    if (id === 'builtin-airi-idle' && this.bundledDirectory || this.bundledItems().some(item => item.id === id)) throw new Error('内置动作不能删除。');
+    const filename = this.file(id);
+    const items = this.list().filter(item => item.id !== id);
+    writeJson(this.index, { version: 1, items: items.filter(item => !item.builtin) });
+    fs.rmSync(filename, { force: true });
+    return items;
+  }
 }
 module.exports = { MotionLibrary, readGlb };

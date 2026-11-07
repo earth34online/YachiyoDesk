@@ -23,7 +23,9 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 2.0 导入预览保留角色已有物理；缺少碰撞配置时，按可识别的身体表面和通用骨骼补基础接触。可试完整动作与行走，再确认入库；支持使用自己的文字 API 调整受限碰撞参数并重新预览，详见 [陪伴功能](docs/COMPANION_2.0.md)。
 
-当前公开版本为 **2.0.0-beta.1**，基于 1.x 收官版 `1.0.9`。新增使用者自己的 AI 接口、文字与可选语音陪伴、导入修复预览、VRMA 动作收藏和角色创作室。详见 [2.0 使用说明](docs/COMPANION_2.0.md) 与 [开发验收记录](docs/DEVELOPMENT_2.0.md)。历史 [1.x 交付记录](docs/RELEASE_20261020.md) 保留。便携版、安装版和校验文件见 [v2.0.0-beta.1 Release](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.1)。
+当前公开版本为 **2.0.0-beta.3**，已固定通用 VRM 动作基线，并提供两份免费官方模型下载。便携版、安装版、模型包和校验文件见 [GitHub Release](https://github.com/earth34online/YachiyoDesk/releases/latest)。新增使用者自己的 AI 接口、文字与可选语音陪伴、导入修复预览、VRMA 动作收藏和角色创作室。详见 [2.0 使用说明](docs/COMPANION_2.0.md) 与 [开发验收记录](docs/DEVELOPMENT_2.0.md)。历史 [1.x 交付记录](docs/RELEASE_20261020.md) 保留。
+
+本版提供 25 项内置动作，包括招手、抱臂、舞蹈、点头摇头、抛掷、拿取、喝饮料、推物、交谈、接电话及窗口边缘陪伴。窗口休息会坐下并保持坐姿，跟随窗口移动；新动作先起身，窗口失去支撑则下落。使用入口、动作来源和当前验证状态见[动作与窗口陪伴](docs/MOTIONS_20261107.md)。
 
 > 你可以把它当作一个可扩展的本地角色运行时：模型属于你自己，程序负责加载、动作、交互、窗口和配置。
 

@@ -214,6 +214,7 @@ export interface AvatarViewportBounds {
   canvasWidth: number;
   canvasHeight?: number;
   footY?: number;
+  supportY?: number;
   footLeft?: number;
   footRight?: number;
   avatarHeight?: number;

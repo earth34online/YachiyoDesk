@@ -1,0 +1,346 @@
+{
+  "generatedAt": "2026-11-07T15:18:42.210Z",
+  "license": "CC0-1.0",
+  "retargetReference": "pixiv/three-vrm@3caf7a21ee68f0d5dfa363ab3d577450bbf60136",
+  "rigMap": {
+    "pelvis": "hips",
+    "spine_01": "spine",
+    "spine_02": "chest",
+    "spine_03": "upperChest",
+    "neck_01": "neck",
+    "Head": "head",
+    "clavicle_l": "leftShoulder",
+    "upperarm_l": "leftUpperArm",
+    "lowerarm_l": "leftLowerArm",
+    "hand_l": "leftHand",
+    "thigh_l": "leftUpperLeg",
+    "calf_l": "leftLowerLeg",
+    "foot_l": "leftFoot",
+    "ball_l": "leftToes",
+    "index_01_l": "leftIndexProximal",
+    "index_02_l": "leftIndexIntermediate",
+    "index_03_l": "leftIndexDistal",
+    "middle_01_l": "leftMiddleProximal",
+    "middle_02_l": "leftMiddleIntermediate",
+    "middle_03_l": "leftMiddleDistal",
+    "ring_01_l": "leftRingProximal",
+    "ring_02_l": "leftRingIntermediate",
+    "ring_03_l": "leftRingDistal",
+    "pinky_01_l": "leftLittleProximal",
+    "pinky_02_l": "leftLittleIntermediate",
+    "pinky_03_l": "leftLittleDistal",
+    "thumb_01_l": "leftThumbMetacarpal",
+    "thumb_02_l": "leftThumbProximal",
+    "thumb_03_l": "leftThumbDistal",
+    "clavicle_r": "rightShoulder",
+    "upperarm_r": "rightUpperArm",
+    "lowerarm_r": "rightLowerArm",
+    "hand_r": "rightHand",
+    "thigh_r": "rightUpperLeg",
+    "calf_r": "rightLowerLeg",
+    "foot_r": "rightFoot",
+    "ball_r": "rightToes",
+    "index_01_r": "rightIndexProximal",
+    "index_02_r": "rightIndexIntermediate",
+    "index_03_r": "rightIndexDistal",
+    "middle_01_r": "rightMiddleProximal",
+    "middle_02_r": "rightMiddleIntermediate",
+    "middle_03_r": "rightMiddleDistal",
+    "ring_01_r": "rightRingProximal",
+    "ring_02_r": "rightRingIntermediate",
+    "ring_03_r": "rightRingDistal",
+    "pinky_01_r": "rightLittleProximal",
+    "pinky_02_r": "rightLittleIntermediate",
+    "pinky_03_r": "rightLittleDistal",
+    "thumb_01_r": "rightThumbMetacarpal",
+    "thumb_02_r": "rightThumbProximal",
+    "thumb_03_r": "rightThumbDistal"
+  },
+  "sources": [
+    {
+      "pack": 1,
+      "url": "https://quaternius.itch.io/universal-animation-library",
+      "filename": "UAL1_Standard.glb",
+      "sha256": "69591853d817488edaa8fd9bf8fc1d821eaeaf789f8627b3cd23b41c4ed67997",
+      "calibration": {
+        "calibration": "A_TPose",
+        "forward": "+Z",
+        "leftHand": [
+          0.7388999100642246,
+          1.4407993322226413,
+          -0.06539990503417238
+        ],
+        "rightHand": [
+          -0.7388999534038512,
+          1.4407994027787756,
+          -0.06539990795653058
+        ],
+        "leftShoulder": [
+          0.19189994117779163,
+          1.4407994396516928,
+          -0.06540006213931646
+        ],
+        "rightShoulder": [
+          -0.1918999496124725,
+          1.4407993129910008,
+          -0.06540004765941343
+        ],
+        "hips": [
+          0,
+          0.9167000055313113,
+          -0.05010004714131377
+        ],
+        "leftFootToToe": [
+          4.496137601117667e-9,
+          -0.08850000988951806,
+          0.14900010746651113
+        ],
+        "tPoseMaxRotationRadians": 0
+      }
+    },
+    {
+      "pack": 2,
+      "url": "https://quaternius.itch.io/universal-animation-library-2",
+      "filename": "UAL2_Standard.glb",
+      "sha256": "8cee20ab1bc55130092447e810e26df22dd2803eccc54f52137a7d54d7ab88a8",
+      "calibration": {
+        "calibration": "A_TPose",
+        "forward": "+Z",
+        "leftHand": [
+          0.7388999100642246,
+          1.4407993322226413,
+          -0.06539990503417238
+        ],
+        "rightHand": [
+          -0.7388999534038512,
+          1.4407994027787756,
+          -0.06539990795653058
+        ],
+        "leftShoulder": [
+          0.19189994117779163,
+          1.4407994396516928,
+          -0.06540006213931646
+        ],
+        "rightShoulder": [
+          -0.1918999496124725,
+          1.4407993129910008,
+          -0.06540004765941343
+        ],
+        "hips": [
+          0,
+          0.9167000055313113,
+          -0.05010004714131377
+        ],
+        "leftFootToToe": [
+          4.496137601117667e-9,
+          -0.08850000988951806,
+          0.14900010746651113
+        ],
+        "tPoseMaxRotationRadians": 0
+      }
+    }
+  ],
+  "clips": [
+    {
+      "pack": 1,
+      "sourceClip": "Idle_Talking_Loop",
+      "filename": "quaternius-idle-talking-loop.vrma",
+      "duration": 2.933333396911621,
+      "channels": 53,
+      "bytes": 121504,
+      "sha256": "2df7cb4afd50bca3d2dffb98b65f8a266a8d70e9db7abf3ebd1672ef4556d6bb",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.076026249855147e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 1,
+      "sourceClip": "Dance_Loop",
+      "filename": "quaternius-dance-loop.vrma",
+      "duration": 6,
+      "repetition": {
+        "repeatCount": 6,
+        "sourceDuration": 1,
+        "maxLoopSeamRadians": 5.960464477539063e-8,
+        "maxLoopSeamPosition": 0
+      },
+      "channels": 53,
+      "bytes": 217964,
+      "sha256": "fd189b6932a83816bed0712823749e1c8ebcf97173772648ac2a342adc2bbd39",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 3.96388533108194e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 1,
+      "sourceClip": "PickUp_Table",
+      "filename": "quaternius-pickup-table.vrma",
+      "duration": 0.8333333134651184,
+      "channels": 53,
+      "bytes": 54940,
+      "sha256": "52eba41486ce1d33cb40b42d2ab71e89db5c6ae8db6000ee03a05938e7984498",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.001184750190845e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 1,
+      "sourceClip": "Push_Loop",
+      "filename": "quaternius-push-loop.vrma",
+      "duration": 2.6666667461395264,
+      "channels": 53,
+      "bytes": 113100,
+      "sha256": "0f97339b617735703482a0bd8a1203433f79fa4e939cc9bad32c032001607643",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.10255616145605e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 1,
+      "sourceClip": "Sitting_Enter",
+      "filename": "quaternius-sitting-enter.vrma",
+      "duration": 1.2999999523162842,
+      "channels": 53,
+      "bytes": 69740,
+      "sha256": "d043441b5a3217fd3b1947f6dca671e9f3fb46ceef2ccc474e618d75459aca71",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.1011367635235274e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 1,
+      "sourceClip": "Sitting_Idle_Loop",
+      "filename": "quaternius-sitting-idle-loop.vrma",
+      "duration": 1.6666666269302368,
+      "channels": 53,
+      "bytes": 81368,
+      "sha256": "b3fdb956898e55777fd491ba0aeefa5d87c824128a98aeba5fae4402e74f76a1",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.03790076930477e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 1,
+      "sourceClip": "Sitting_Exit",
+      "filename": "quaternius-sitting-exit.vrma",
+      "duration": 1.0333333015441895,
+      "channels": 53,
+      "bytes": 61288,
+      "sha256": "9f729b23d534ff94febe7678baa638244da712e81e8fc7e1c857ebc4d36df817",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.001046616242121e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 2,
+      "sourceClip": "Yes",
+      "filename": "quaternius-yes.vrma",
+      "duration": 2.5,
+      "channels": 53,
+      "bytes": 107020,
+      "sha256": "d7a223ada17b7c5e46d00750e14f8d09387b1be808d999b12bf0e94cbcf94846",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 3.9689653008601056e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 2,
+      "sourceClip": "Idle_No_Loop",
+      "filename": "quaternius-idle-no-loop.vrma",
+      "duration": 2.5,
+      "channels": 53,
+      "bytes": 107028,
+      "sha256": "fcaf485e5d54ad73c721e315067190d4a3355a4bd4dc90b8276a214b896bd6b7",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.1531946548545307e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 2,
+      "sourceClip": "Idle_FoldArms_Loop",
+      "filename": "quaternius-idle-foldarms-loop.vrma",
+      "duration": 2.5,
+      "channels": 53,
+      "bytes": 107032,
+      "sha256": "19dcc5d8adcde3222449eb0f0260cc9cf2649c0744a49df04355183a237fed1b",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.0260380695933407e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 2,
+      "sourceClip": "Consume",
+      "filename": "quaternius-consume.vrma",
+      "duration": 1.3333333730697632,
+      "channels": 53,
+      "bytes": 70792,
+      "sha256": "15847fcccf3a4663aa6827f5bad2167e6d63ae76f68b7bef09df19a508ddd9cd",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 3.9077955760191685e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 2,
+      "sourceClip": "Idle_TalkingPhone_Loop",
+      "filename": "quaternius-idle-talkingphone-loop.vrma",
+      "duration": 2.933333396911621,
+      "channels": 53,
+      "bytes": 121512,
+      "sha256": "b8a2c4e3c9839baf208427d74e20cc65848cce4704a2bd69a727224863604356",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 4.076026249855147e-8,
+      "loadedValuesAndTimesMaxError": 0
+    },
+    {
+      "pack": 2,
+      "sourceClip": "OverhandThrow",
+      "filename": "quaternius-overhandthrow.vrma",
+      "duration": 1.3333333730697632,
+      "channels": 53,
+      "bytes": 70796,
+      "sha256": "12055cbc62a00dd5c611db0e2257a4782be2ad7cc33106f6398b59a77e71f11c",
+      "validatorErrors": 0,
+      "validatorWarnings": 0,
+      "rotationTracks": 52,
+      "hipsTracks": 1,
+      "loadedQuaternionNormError": 3.784779822879614e-8,
+      "loadedValuesAndTimesMaxError": 0
+    }
+  ]
+}

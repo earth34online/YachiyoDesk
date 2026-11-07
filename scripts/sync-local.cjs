@@ -11,7 +11,8 @@ function sharedFiles(source) {
       const filename = path.join(relative, entry.name);
       if (entry.isDirectory()) collect(filename);
       else if (/\.(ts|css|cjs|mjs|py|json|ps1|md|yaml|vrma)$/.test(entry.name)
-        || filename === path.join('electron', 'THIRD_PARTY_LICENSES.txt')) files.push(filename);
+        || filename === path.join('electron', 'THIRD_PARTY_LICENSES.txt')
+        || (relative.startsWith('assets/motions') && entry.name.endsWith('.txt'))) files.push(filename);
     }
   };
   for (const directory of ['src', 'electron', 'tests', 'converter', 'scripts', 'skills', 'assets/motions']) collect(directory);

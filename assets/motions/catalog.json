@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "builtin-greet",
+      "name": "招手问候",
+      "action": "greet"
+    },
+    {
+      "id": "builtin-joy",
+      "name": "开心回应",
+      "action": "joy"
+    },
+    {
+      "id": "builtin-surprised",
+      "name": "惊讶",
+      "action": "surprised"
+    },
+    {
+      "id": "builtin-angry",
+      "name": "抱臂不满",
+      "file": "quaternius-idle-foldarms-loop.vrma",
+      "sha256": "19dcc5d8adcde3222449eb0f0260cc9cf2649c0744a49df04355183a237fed1b",
+      "reaction": "angry"
+    },
+    {
+      "id": "builtin-sleepy",
+      "name": "困倦",
+      "action": "sleepy"
+    },
+    {
+      "id": "builtin-poke",
+      "name": "轻碰回应",
+      "action": "poke"
+    },
+    {
+      "id": "builtin-bow",
+      "name": "鞠躬",
+      "action": "bow"
+    },
+    {
+      "id": "builtin-stretch",
+      "name": "伸懒腰",
+      "action": "stretch"
+    },
+    {
+      "id": "builtin-dance",
+      "name": "随节奏轻舞",
+      "file": "quaternius-dance-loop.vrma",
+      "sha256": "fd189b6932a83816bed0712823749e1c8ebcf97173772648ac2a342adc2bbd39",
+      "reaction": "dance"
+    },
+    {
+      "id": "builtin-look-around",
+      "name": "环顾",
+      "action": "lookAround"
+    },
+    {
+      "id": "builtin-nod",
+      "name": "点头肯定",
+      "file": "quaternius-yes.vrma",
+      "sha256": "d7a223ada17b7c5e46d00750e14f8d09387b1be808d999b12bf0e94cbcf94846",
+      "reaction": "nod"
+    },
+    {
+      "id": "builtin-shake-head",
+      "name": "摇头拒绝",
+      "file": "quaternius-idle-no-loop.vrma",
+      "sha256": "fcaf485e5d54ad73c721e315067190d4a3355a4bd4dc90b8276a214b896bd6b7",
+      "reaction": "shakeHead"
+    },
+    {
+      "id": "builtin-shy",
+      "name": "害羞",
+      "action": "shy"
+    },
+    {
+      "id": "builtin-cheer",
+      "name": "欢呼加油",
+      "action": "cheer"
+    },
+    {
+      "id": "builtin-think",
+      "name": "托腮思考",
+      "action": "think"
+    },
+    {
+      "id": "builtin-crouch",
+      "name": "下蹲观察",
+      "action": "crouch"
+    },
+    {
+      "id": "builtin-tiptoe",
+      "name": "踮脚张望",
+      "action": "tiptoe"
+    },
+    {
+      "id": "builtin-sway",
+      "name": "重心摇摆",
+      "action": "sway"
+    },
+    {
+      "id": "builtin-overhandthrow",
+      "name": "向前抛掷",
+      "file": "quaternius-overhandthrow.vrma",
+      "sha256": "12055cbc62a00dd5c611db0e2257a4782be2ad7cc33106f6398b59a77e71f11c"
+    },
+    {
+      "id": "builtin-consume",
+      "name": "饮用动作",
+      "file": "quaternius-consume.vrma",
+      "sha256": "15847fcccf3a4663aa6827f5bad2167e6d63ae76f68b7bef09df19a508ddd9cd"
+    },
+    {
+      "id": "builtin-pickup-table",
+      "name": "伸手拿取",
+      "file": "quaternius-pickup-table.vrma",
+      "sha256": "52eba41486ce1d33cb40b42d2ab71e89db5c6ae8db6000ee03a05938e7984498"
+    },
+    {
+      "id": "builtin-push-loop",
+      "name": "双手轻推",
+      "file": "quaternius-push-loop.vrma",
+      "sha256": "0f97339b617735703482a0bd8a1203433f79fa4e939cc9bad32c032001607643"
+    },
+    {
+      "id": "builtin-idle-talking-loop",
+      "name": "自然交谈",
+      "file": "quaternius-idle-talking-loop.vrma",
+      "sha256": "2df7cb4afd50bca3d2dffb98b65f8a266a8d70e9db7abf3ebd1672ef4556d6bb"
+    },
+    {
+      "id": "builtin-idle-talkingphone-loop",
+      "name": "接听电话",
+      "file": "quaternius-idle-talkingphone-loop.vrma",
+      "sha256": "b8a2c4e3c9839baf208427d74e20cc65848cce4704a2bd69a727224863604356"
+    },
+    {
+      "id": "builtin-window-rest",
+      "name": "窗口边缘陪伴",
+      "interaction": "window-rest"
+    },
+    {
+      "id": "builtin-window-enter",
+      "name": "窗口休息 · enter",
+      "file": "quaternius-sitting-enter.vrma",
+      "sha256": "d043441b5a3217fd3b1947f6dca671e9f3fb46ceef2ccc474e618d75459aca71",
+      "hidden": true
+    },
+    {
+      "id": "builtin-window-idle",
+      "name": "窗口休息 · idle",
+      "file": "quaternius-sitting-idle-loop.vrma",
+      "sha256": "b3fdb956898e55777fd491ba0aeefa5d87c824128a98aeba5fae4402e74f76a1",
+      "hidden": true
+    },
+    {
+      "id": "builtin-window-exit",
+      "name": "窗口休息 · exit",
+      "file": "quaternius-sitting-exit.vrma",
+      "sha256": "9f729b23d534ff94febe7678baa638244da712e81e8fc7e1c857ebc4d36df817",
+      "hidden": true
+    }
+  ]
+}

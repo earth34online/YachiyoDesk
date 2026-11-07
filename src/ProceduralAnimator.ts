@@ -129,6 +129,7 @@ export class ProceduralAnimator {
   private settings: AppSettings;
   private readonly motionProfile: MotionProfile;
   private readonly genericConstraints: GenericPoseConstraints | null;
+  private seatedConstraints: GenericPoseConstraints | null | undefined;
   private readonly jointDynamics = new JointDynamics();
   private readonly skirtRestAngles: { left: number; right: number; leftRadius: number; rightRadius: number; frontDepth: number; backDepth: number; gaitScale: number; lateralGaitScale: number; height: number } | null;
   private elapsed = 0;
@@ -178,6 +179,8 @@ export class ProceduralAnimator {
     if (vrm.lookAt) vrm.lookAt.autoUpdate = false;
   }
 
+  get drivenBoneNames(): string[] { return Object.keys(this.pose); }
+
   setSettings(settings: AppSettings): void {
     this.settings = settings;
   }
@@ -201,6 +204,10 @@ export class ProceduralAnimator {
   }
 
   constrainExternalPose(): void { this.genericConstraints?.constrainExternalArms(this.skirtRestAngles); }
+  constrainSeatedHands(maintainContact: boolean): void {
+    this.seatedConstraints ??= this.genericConstraints ?? GenericPoseConstraints.createContactSolver(this.vrm);
+    this.seatedConstraints?.constrainSeatedHands(maintainContact);
+  }
 
   sampleFingerFlexion(): Array<Record<string, unknown>> {
     if (!this.genericConstraints) return [];
@@ -258,13 +265,13 @@ export class ProceduralAnimator {
     }
   }
 
-  trigger(name: ReactionName): void {
+  trigger(name: ReactionName, duration = REACTION_DURATION[name]): void {
     if (!this.settings.reactions && name !== 'sleepy') return;
     // Preserve the exact current pose and cross-fade from it. High-frequency
     // interaction can otherwise replace an in-progress state with a new pose
     // whose envelope starts at zero, causing a one-frame snap to neutral.
     this.beginPoseTransition();
-    this.reaction = { name, startedAt: this.elapsed, duration: REACTION_DURATION[name] };
+    this.reaction = { name, startedAt: this.elapsed, duration };
     this.autonomousMotion = 'idle';
     this.noteActivity();
   }
@@ -641,6 +648,11 @@ export class ProceduralAnimator {
       rightLowerX = THREE.MathUtils.lerp(rightLowerX, -0.025, weight);
       rightLowerY = THREE.MathUtils.lerp(rightLowerY, -0.015, weight);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 1.08 + wave * 0.16, weight);
+      if (this.genericConstraints) {
+        rightArmZ += wave * .055 * weight;
+        rightLowerZ += wave * .12 * weight;
+        torsoY += wave * .025 * weight;
+      }
       // Twist only the wrist around the forearm axis so the palm, rather than
       // its edge, faces the viewer. The approved shoulder/elbow chain stays
       // exactly as tuned above.
@@ -675,6 +687,17 @@ export class ProceduralAnimator {
       rightFingerCurl = THREE.MathUtils.lerp(rightFingerCurl, 0.065 * fingerCurlScale, lift);
       leftKneeX += 0.025 * lift;
       rightKneeX += 0.025 * lift;
+      if (this.genericConstraints) {
+        const leftLift = windowPulse(progress, .03, .23, .69, .95) * weight;
+        const rightLift = windowPulse(progress, .09, .29, .74, .99) * weight;
+        const bounce = Math.sin(reactionElapsed * Math.PI * 2.5);
+        leftArmZ = THREE.MathUtils.lerp(this.leftRestArmAngle, 1.12, leftLift);
+        rightArmZ = THREE.MathUtils.lerp(-this.rightRestArmAngle, -1.12, rightLift);
+        leftLowerY = THREE.MathUtils.lerp(leftLowerY, -.95 - bounce * .13, leftLift);
+        rightLowerY = THREE.MathUtils.lerp(rightLowerY, .95 - bounce * .13, rightLift);
+        leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -.12, leftLift);
+        rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, .12, rightLift);
+      }
     } else if (reaction === 'surprised') {
       const recoil = Math.sin(progress * Math.PI) * weight;
       hipsZ -= 0.008 * recoil;
@@ -692,6 +715,10 @@ export class ProceduralAnimator {
       leftPalm = rightPalm = recoil;
       if (!this.directArmRig?.hasPalmBasis('left')) leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, recoil);
       if (!this.directArmRig?.hasPalmBasis('right')) rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, recoil);
+      if (this.genericConstraints) {
+        leftLowerY -= recoil * .55;
+        rightLowerY += recoil * .55;
+      }
     } else if (reaction === 'angry') {
       const disapproval = Math.sin(reactionElapsed * 3.2) * 0.018 * weight;
       hipsX += 0.011 * weight;
@@ -765,6 +792,14 @@ export class ProceduralAnimator {
       leftPalm = rightPalm = stretch;
       if (!this.directArmRig?.hasPalmBasis('left')) leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, stretch);
       if (!this.directArmRig?.hasPalmBasis('right')) rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, stretch);
+      if (this.genericConstraints) {
+        const reach = Math.sin(reactionElapsed * 1.8);
+        leftArmZ -= (.22 + reach * .10) * stretch;
+        rightArmZ += (.22 - reach * .10) * stretch;
+        leftLowerY -= (1 - reach) * .10 * stretch;
+        rightLowerY += (1 + reach) * .10 * stretch;
+        torsoY += reach * .045 * stretch;
+      }
     } else if (reaction === 'dance') {
       const dance = windowPulse(progress, 0.02, 0.11, 0.87, 0.99) * weight;
       const beat = Math.sin(reactionElapsed * Math.PI * 1.7);
@@ -851,6 +886,14 @@ export class ProceduralAnimator {
       rightFingerCurl = THREE.MathUtils.lerp(rightFingerCurl, 0.055 * fingerCurlScale, active);
       leftKneeX += (0.10 + Math.max(0, -beat) * 0.30) * active;
       rightKneeX += (0.10 + Math.max(0, -beat) * 0.30) * active;
+      if (this.genericConstraints) {
+        const leftReach = .5 + .5 * Math.sin(reactionElapsed * Math.PI * 1.8);
+        const rightReach = .5 + .5 * Math.sin(reactionElapsed * Math.PI * 1.8 + .85);
+        leftArmZ = THREE.MathUtils.lerp(leftArmZ, -.25 - leftReach * .30, active);
+        rightArmZ = THREE.MathUtils.lerp(rightArmZ, .25 + rightReach * .30, active);
+        leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -.68 + leftReach * .38, active);
+        rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, .68 - rightReach * .38, active);
+      }
     } else if (reaction === 'think') {
       const active = windowPulse(progress, 0.03, 0.22, 0.79, 0.98) * weight;
       const ponder = Math.sin(reactionElapsed * 1.35) * active;

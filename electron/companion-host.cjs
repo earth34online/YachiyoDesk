@@ -111,7 +111,9 @@ class CompanionHost {
       case 'motion.remove': return this.motions.remove(input.id);
       case 'motion.load': {
         const file = this.motions.file(input.id);
-        if (!this.motions.list().some(item => item.id === input.id)) throw new Error('动作不存在。');
+          const bundled = this.motions.bundledItems().some(item => item.id === input.id && item.file)
+            || (input.id === 'builtin-airi-idle' && this.motions.bundledDirectory && fs.existsSync(file));
+          if (!bundled && !this.motions.list().some(item => item.id === input.id)) throw new Error('动作不存在。');
         // VRMA is bounded on import; binary IPC avoids arbitrary filesystem URLs.
         const bytes = fs.readFileSync(file);
         return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);

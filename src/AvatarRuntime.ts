@@ -10,6 +10,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clamp, damp, nextAdaptiveScale, normalizedPointer } from './math';
 import { ProceduralAnimator } from './ProceduralAnimator';
 import { DesktopContactPose, type DesktopContactState } from './DesktopContactPose';
+import type { MotionPlaybackOptions } from './MotionPlayer';
 import { shouldCombineSkeletons } from './skin-policy';
 import { repairPmxSkinSeams } from './skinSeams';
 import { repairPmxSkinGradients } from './skinGradients';
@@ -85,25 +86,117 @@ export class AvatarRuntime {
   private naturalIdleBytes: ArrayBuffer | null = null;
   private naturalIdlePending = false;
   private naturalIdleFailed = false;
-  private motionKind: 'natural' | 'user' | null = null;
+  private readonly reactionMotions = new Map<ReactionName, { bytes: ArrayBuffer; name: string }>();
+  private motionKind: 'natural' | 'user' | 'reaction' | 'window' | null = null;
+  private readonly windowRestMotions = new Map<'enter' | 'idle' | 'exit', { bytes: ArrayBuffer; name: string }>();
+  private windowRestStage: 'off' | 'enter' | 'idle' | 'exit' | 'leaving' = 'off';
+  private windowRestSequence = 0;
+  private windowRestLoading = false;
+  private windowRestElapsed = 0;
+  private windowRestStartWeight = 0;
+  private seatWeight = 0;
+  private footExtents: { bone: THREE.Object3D; corners: THREE.Vector3[] }[] = [];
+  private motionKeepsHipsHeight = false;
+  private motionCameraOffset = 0;
+  private nextViewportNotification = 0;
+  private viewportDirty = false;
+  private queuedWindowAction: { run: () => void; cancel: () => void } | null = null;
   private idleResumeAt = 0;
   configureNaturalIdle(bytes: ArrayBuffer): void { this.naturalIdleBytes = bytes; this.naturalIdleFailed = false; }
-  async playMotion(bytes: ArrayBuffer, name: string, loop = false): Promise<void> {
-    return this.startMotion(bytes,name,loop,'user');
+  configureReactionMotion(reaction: ReactionName, bytes: ArrayBuffer, name: string): void {
+    if (!this.disposed) this.reactionMotions.set(reaction, { bytes, name });
   }
-  private async startMotion(bytes: ArrayBuffer,name: string,loop: boolean,kind: 'natural'|'user'): Promise<void> {
+  configureWindowRestMotion(kind: 'enter' | 'idle' | 'exit', bytes: ArrayBuffer, name: string): void {
+    if (!this.disposed) this.windowRestMotions.set(kind, { bytes, name });
+  }
+  async playMotion(bytes: ArrayBuffer, name: string, loop = false, options: MotionPlaybackOptions = {}): Promise<void> {
+    if (this.windowRestStage !== 'off') {
+      return new Promise<void>((resolve, reject) => {
+        this.queuedWindowAction?.cancel();
+        this.queuedWindowAction = {
+          run: () => { void this.startMotion(bytes, name, loop, 'user', options).then(resolve, reject); },
+          cancel: () => reject(new Error('动作已取消。')),
+        };
+        this.requestWindowRise();
+      });
+    }
+    return this.startMotion(bytes,name,loop,'user',options);
+  }
+  private async startMotion(bytes: ArrayBuffer,name: string,loop: boolean,kind: 'natural'|'user'|'reaction'|'window',options: MotionPlaybackOptions = {}): Promise<void> {
     const sequence = ++this.motionSequence;
     const vrm=this.vrm;
     if (!vrm || this.disposed) throw new Error('请先载入角色。');
-    if (!this.motionPlayer) { const { MotionPlayer } = await import('./MotionPlayer'); if(sequence !== this.motionSequence || this.vrm!==vrm || this.disposed) return; this.motionPlayer ||= new MotionPlayer(vrm); }
+    if (!this.motionPlayer) { const { MotionPlayer } = await import('./MotionPlayer'); if(sequence !== this.motionSequence || this.vrm!==vrm || this.disposed) return; this.motionPlayer ||= new MotionPlayer(vrm, this.animator?.drivenBoneNames); }
     this.motionKind=kind;
-    await this.motionPlayer.play(bytes, name, loop);
+    this.motionKeepsHipsHeight = Boolean(options.preserveHipsHeight);
+    await this.motionPlayer.play(bytes, name, loop, options);
     if (sequence !== this.motionSequence || this.vrm !== vrm || this.disposed) return;
     this.noteActivity();
   }
-  stopMotion(): void { ++this.motionSequence; this.motionPlayer?.stop(); this.motionKind=null; this.idleResumeAt=performance.now()+3000; }
+  stopMotion(): void {
+    this.queuedWindowAction?.cancel(); this.queuedWindowAction = null;
+    if (this.windowRestStage !== 'off') { this.requestWindowRise(); return; }
+    this.stopLayers();
+  }
+  private stopLayers(immediate = false): void {
+    ++this.motionSequence; this.motionPlayer?.stop(immediate);
+    if (immediate || this.motionKind !== 'window') this.motionKind=null;
+    this.idleResumeAt=performance.now()+3000;
+  }
+  private cancelWindowRest(immediate = true): void {
+    ++this.windowRestSequence;
+    this.windowRestStage = 'off'; this.windowRestLoading = false; this.windowRestElapsed = 0; this.seatWeight = 0;
+    this.queuedWindowAction?.cancel(); this.queuedWindowAction = null;
+    this.viewportDirty = true;
+    this.desktopContactPose?.set({ phase: 'idle' });
+    this.stopLayers(immediate);
+  }
+  private async beginWindowMotion(stage: 'enter' | 'idle' | 'exit'): Promise<void> {
+    const sequence = ++this.windowRestSequence, motion = this.windowRestMotions.get(stage);
+    this.windowRestStage = stage; this.windowRestLoading = true; this.windowRestElapsed = 0;
+    this.windowRestStartWeight = this.seatWeight;
+    try {
+      if (!motion) throw new Error('窗口休息动作尚未载入。');
+      await this.startMotion(motion.bytes, motion.name, stage === 'idle', 'window', { preserveHipsHeight: true, hold: stage !== 'idle' });
+      if (sequence !== this.windowRestSequence || this.disposed) return;
+      this.windowRestElapsed = 0;
+    } catch (error) {
+      if (sequence !== this.windowRestSequence || this.disposed) return;
+      console.warn('Window rest motion unavailable; releasing contact.', error);
+      this.cancelWindowRest();
+    } finally {
+      if (sequence === this.windowRestSequence) this.windowRestLoading = false;
+    }
+  }
+  private requestWindowRise(): void {
+    if (this.windowRestStage === 'off' || this.windowRestStage === 'exit' || this.windowRestStage === 'leaving') return;
+    this.desktopContactPose?.set({ phase: 'rise' });
+    void this.beginWindowMotion('exit');
+  }
+  private updateWindowRest(delta: number): void {
+    if (this.windowRestStage === 'off') return;
+    this.viewportDirty = true;
+    if (this.windowRestLoading) return;
+    this.windowRestElapsed += delta;
+    const progress = clamp(this.windowRestElapsed / Math.max(.001, this.motionPlayer?.duration || 1), 0, 1);
+    const smooth = progress * progress * (3 - 2 * progress);
+    if (this.windowRestStage === 'enter') {
+      this.seatWeight = THREE.MathUtils.lerp(this.windowRestStartWeight, 1, smooth);
+      if (this.motionPlayer?.finished) { this.seatWeight = 1; void this.beginWindowMotion('idle'); }
+    } else if (this.windowRestStage === 'idle') {
+      this.seatWeight = 1;
+    } else if (this.windowRestStage === 'exit') {
+      this.seatWeight = THREE.MathUtils.lerp(this.windowRestStartWeight, 0, smooth);
+      if (this.motionPlayer?.finished) { this.seatWeight = 0; this.windowRestStage = 'leaving'; this.stopLayers(); }
+    } else if (!this.motionPlayer?.playing) {
+      this.windowRestStage = 'off'; this.seatWeight = 0;
+      this.desktopContactPose?.set({ phase: 'idle' });
+      const queued = this.queuedWindowAction; this.queuedWindowAction = null;
+      queued?.run();
+    }
+  }
   get motionPlaying(): boolean { return this.motionPlayer?.playing ?? false; }
-  get canPlayLibraryMotion(): boolean { return Boolean(this.animator?.canUseIdleAnimation && (this.motionKind==='natural' || !this.motionPlaying)); }
+  get canPlayLibraryMotion(): boolean { return this.windowRestStage==='off' && Boolean(this.animator?.canUseIdleAnimation && (this.motionKind==='natural' || !this.motionPlaying)); }
   setVoiceMouth(value: number): void { this.voiceMouth = Number.isFinite(value) ? clamp(value, 0, 1) : 0; }
   captureImage(): string {
     this.renderer.render(this.scene, this.camera);
@@ -298,6 +391,7 @@ export class AvatarRuntime {
       this.pmxPhysics?.beforePose();
       this.animator.update(0);
       this.updateVrm(0);
+      this.measureFootExtents(vrm);
       this.callbacks.onProgress(96, '准备角色材质…');
       await this.renderer.compileAsync(this.scene, this.camera);
       if (!current()) return;
@@ -397,8 +491,7 @@ export class AvatarRuntime {
     if (!this.bootstrap.smokeTest || !this.vrm) return;
     this.diagnosticBindPose = active;
     if (active) {
-      ++this.motionSequence;
-      this.motionPlayer?.stop(true);this.motionKind=null;
+      this.cancelWindowRest();
       this.vrm.humanoid.resetNormalizedPose();
       this.vrm.springBoneManager?.reset();
     }
@@ -440,22 +533,63 @@ export class AvatarRuntime {
   }
 
   triggerReaction(name: ReactionName): void {
+    if (!this.settings.reactions && name !== 'sleepy') return;
+    if (this.windowRestStage !== 'off') {
+      this.queuedWindowAction?.cancel();
+      this.queuedWindowAction = { run: () => this.triggerReaction(name), cancel: () => {} };
+      this.requestWindowRise();
+      return;
+    }
     this.stopMotion();
     this.autonomyFacing = 0;
     this.animator?.trigger(name);
+    const motion = this.reactionMotions.get(name);
+    if (motion && this.bootstrap.character.motionProfile.profileId === 'generic-vrm') {
+      const sequence = this.motionSequence + 1;
+      void this.startMotion(motion.bytes, motion.name, false, 'reaction', { preserveHipsHeight: true }).then(() => {
+        if (sequence === this.motionSequence && this.motionPlayer?.duration) {
+          this.animator?.trigger(name, this.motionPlayer.duration);
+        }
+      }).catch(error => console.warn('Gesture animation unavailable; retaining procedural gesture.', error));
+    }
   }
 
   setDesktopContact(state: DesktopContactState): void {
     if (!this.vrm) return;
-    if (state.phase !== 'idle') { this.stopMotion(); this.animator?.setAutonomousMotion('idle',1); }
+    if (state.phase === 'sit') {
+      if (this.windowRestStage !== 'off') return;
+      if (!['enter','idle','exit'].every(kind => this.windowRestMotions.has(kind as 'enter'|'idle'|'exit'))) {
+        console.warn('Window rest requires all three configured animation segments.');
+        return;
+      }
+      this.stopLayers(); this.autonomyFacing = 0;
+      this.animator?.setAutonomousMotion('idle',1);
+      this.desktopContactPose ??= new DesktopContactPose(this.vrm,this.camera,this.canvas);
+      this.desktopContactPose.set(state);
+      void this.beginWindowMotion('enter');
+      return;
+    }
+    if (state.phase === 'rise' || (state.phase === 'idle' && this.windowRestStage !== 'off')) { this.requestWindowRise(); return; }
+    if (state.phase !== 'idle') {
+      this.cancelWindowRest(state.phase !== 'fall');
+      this.animator?.setAutonomousMotion('idle',1);
+    }
     this.animator?.setDragging(this.pointerDragging || state.phase === 'fall');
     this.desktopContactPose ??= new DesktopContactPose(this.vrm,this.camera,this.canvas);
     this.desktopContactPose.set(state);
   }
 
-  desktopContactSnapshot(): Record<string, unknown> | null { return this.desktopContactPose ? {...this.desktopContactPose.diagnostics} : null; }
+  desktopContactSnapshot(): Record<string, unknown> | null {
+    return this.desktopContactPose ? { ...this.desktopContactPose.diagnostics, windowRestStage: this.windowRestStage,
+      seatWeight: this.seatWeight, windowRestConfigured: this.windowRestMotions.size } : null;
+  }
 
   setAutonomy(command: AutonomyCommand): void {
+    if (this.windowRestStage !== 'off') {
+      this.animator?.setAutonomousMotion('idle',1);
+      this.autonomyFacing = 0;
+      return;
+    }
     if (command.action === 'walk') this.stopMotion();
     const direction = command.direction === -1 ? -1 : 1;
     // A desktop walk travels horizontally while the camera looks at the
@@ -468,16 +602,13 @@ export class AvatarRuntime {
 
   setDragging(active: boolean): void {
     this.pointerDragging = active;
-    if (active) this.stopMotion();
+    if (active) this.cancelWindowRest(false);
     this.autonomyFacing = 0;
     this.animator?.setDragging(active);
   }
 
   resetPose(): void {
-    this.desktopContactPose?.set({phase:'idle'});
-    ++this.motionSequence;
-    this.motionPlayer?.stop(true);
-    this.motionKind=null;this.idleResumeAt=performance.now()+3000;
+    this.cancelWindowRest();
     this.targetRotationY = 0;
     this.currentRotationY = 0;
     this.avatarPivot.rotation.y = 0;
@@ -619,8 +750,52 @@ export class AvatarRuntime {
       return bone ? [project(bone.getWorldPosition(new THREE.Vector3())).x] : [];
     });
     const soleGuard = Math.max(2,Math.abs(floor.y-top.y)*.018);
-    return { canvasHeight:height,footY:floor.y,footLeft:Math.max(0,Math.min(...feet,width*.5)-soleGuard),
+    let supportY: number | undefined;
+    if ((this.windowRestStage && this.windowRestStage !== 'off') || this.seatWeight > 0) {
+      const hips = this.vrm?.humanoid.getRawBoneNode('hips');
+      const left = this.vrm?.humanoid.getRawBoneNode('leftUpperLeg');
+      const right = this.vrm?.humanoid.getRawBoneNode('rightUpperLeg');
+      if (hips && left && right) {
+        const hip = hips.getWorldPosition(new THREE.Vector3());
+        const leftHip = left.getWorldPosition(new THREE.Vector3()), rightHip = right.getWorldPosition(new THREE.Vector3());
+        const seat = leftHip.clone().add(rightHip).multiplyScalar(.5).lerp(hip,.5);
+        // Pelvis width gives a rig-derived approximation of the underside,
+        // instead of a character-specific screen offset or standing feet.
+        seat.y -= leftHip.distanceTo(rightHip) * .25;
+        supportY = THREE.MathUtils.lerp(floor.y, project(seat).y, this.seatWeight);
+      }
+    }
+    return { canvasHeight:height,footY:floor.y,supportY,footLeft:Math.max(0,Math.min(...feet,width*.5)-soleGuard),
       footRight:Math.min(width,Math.max(...feet,width*.5)+soleGuard),avatarHeight:Math.abs(floor.y-top.y) };
+  }
+
+  private measureFootExtents(vrm: VRM): void {
+    const bounds = new Map<THREE.Object3D, THREE.Box3>();
+    for (const name of ['leftFoot', 'rightFoot', 'leftToes', 'rightToes']) {
+      const bone = vrm.humanoid.getRawBoneNode(name as VRMHumanBoneName);
+      if (bone) bounds.set(bone, new THREE.Box3());
+    }
+    const vertex = new THREE.Vector3();
+    vrm.scene.traverse(object => {
+      const mesh = object as THREE.SkinnedMesh;
+      if (!mesh.isSkinnedMesh) return;
+      const indices = mesh.geometry.getAttribute('skinIndex'), weights = mesh.geometry.getAttribute('skinWeight');
+      if (!indices || !weights) return;
+      for (let i = 0; i < indices.count; i++) {
+        let owner: THREE.Object3D | undefined, largest = 0, footWeight = 0;
+        for (let slot = 0; slot < 4; slot++) {
+          const bone = mesh.skeleton.bones[indices.getComponent(i, slot)], weight = weights.getComponent(i, slot);
+          if (bounds.has(bone)) { footWeight += weight; if (weight > largest) { owner = bone; largest = weight; } }
+        }
+        if (owner && footWeight >= .5) {
+          mesh.getVertexPosition(i, vertex).applyMatrix4(mesh.matrixWorld);
+          bounds.get(owner)!.expandByPoint(owner.worldToLocal(vertex));
+        }
+      }
+    });
+    this.footExtents = [...bounds].filter(([,box]) => !box.isEmpty()).map(([bone, box]) => ({ bone,
+      corners: [0,1,2,3,4,5,6,7].map(mask => new THREE.Vector3(mask&1?box.max.x:box.min.x,
+        mask&2?box.max.y:box.min.y,mask&4?box.max.z:box.min.z)) }));
   }
 
   resize(): void {
@@ -633,8 +808,10 @@ export class AvatarRuntime {
   }
 
   dispose(): void {
-    ++this.motionSequence;
+    this.cancelWindowRest();
     this.naturalIdleBytes=null;
+    this.reactionMotions?.clear();
+    this.windowRestMotions?.clear();
     this.motionPlayer?.dispose(); this.motionPlayer = null;
     if (this.disposed) return;
     this.disposed = true;
@@ -650,6 +827,7 @@ export class AvatarRuntime {
   }
 
   private releaseModel(): void {
+    this.cancelWindowRest();
     this.pmxPhysics?.dispose();
     this.pmxPhysics = null;
     this.garmentContact?.dispose();
@@ -769,7 +947,7 @@ export class AvatarRuntime {
     const horizontalDistance = this.modelWidth / (2 * Math.tan(horizontalFov / 2));
     this.baseCameraDistance = Math.max(verticalDistance * 1.08, horizontalDistance * 1.12, 0.5);
     const cameraDistance = this.baseCameraDistance / this.settings.zoom;
-    const targetY = this.floorAnchoredCameraY(cameraDistance);
+    const targetY = this.floorAnchoredCameraY(cameraDistance) + this.motionCameraOffset;
     this.camera.position.set(0, targetY, cameraDistance);
     this.camera.lookAt(0, targetY, 0);
     this.camera.near = Math.max(0.005, this.baseCameraDistance * 0.01);
@@ -779,7 +957,7 @@ export class AvatarRuntime {
 
   private updateCamera(): void {
     const cameraDistance = this.baseCameraDistance / this.settings.zoom;
-    const targetY = this.floorAnchoredCameraY(cameraDistance);
+    const targetY = this.floorAnchoredCameraY(cameraDistance) + this.motionCameraOffset;
     this.camera.position.set(0, targetY, cameraDistance);
     this.camera.lookAt(0, targetY, 0);
     this.camera.far = Math.max(20, cameraDistance + this.modelHeight * 4);
@@ -852,10 +1030,16 @@ export class AvatarRuntime {
     if (!this.diagnosticBindPose) this.animator.update(delta);
     this.updateNaturalIdle(timestamp);
     this.motionPlayer?.update(delta);
-    if (this.motionPlayer?.playing && this.motionKind !== 'natural') this.animator.constrainExternalPose();
+    if (!this.motionPlayer?.playing && this.windowRestStage === 'off' && this.motionKind === 'window') this.motionKind = null;
+    this.updateWindowRest(delta);
+    this.shadow.visible = this.settings.contactShadow && this.windowRestStage === 'off' && this.motionKind !== 'window';
+    if (this.windowRestStage !== 'off' || (this.motionKind === 'window' && this.motionPlayer?.playing)) {
+      this.animator.constrainSeatedHands(this.windowRestStage === 'idle');
+    }
+    if (this.motionPlayer?.playing && this.motionKind !== 'natural' && this.motionKind !== 'window') this.animator.constrainExternalPose();
     if (this.desktopContactPose?.active) {
       this.desktopContactPose.update(delta);
-      this.animator.constrainExternalPose();
+      if (this.windowRestStage === 'off' && this.motionKind !== 'window') this.animator.constrainExternalPose();
     }
     if (this.voiceMouth > 0) {
       const manager = this.vrm.expressionManager;
@@ -865,6 +1049,29 @@ export class AvatarRuntime {
     this.currentRotationY = damp(this.currentRotationY, this.targetRotationY + this.autonomyFacing, 8.5, delta);
     this.avatarPivot.rotation.y = this.currentRotationY;
     this.updateVrm(delta);
+    // A seated animation can put the soles below its standing origin. Keep
+    // those feet inside the canvas by translating the camera vertically;
+    // retain the same zoom and let the contact anchor follow the projection.
+    let cameraOffset = 0;
+    if (this.motionPlayer?.playing && this.motionKeepsHipsHeight) {
+      for (const { bone, corners } of this.footExtents) {
+        for (const corner of corners) {
+          const point = bone.localToWorld(corner.clone());
+          const distance = this.camera.position.z;
+          cameraOffset = Math.min(cameraOffset, point.y + this.floorAnchoredCameraY(distance - point.z) - this.floorAnchoredCameraY(distance));
+        }
+      }
+    }
+    if (Math.abs(cameraOffset - this.motionCameraOffset) > 1e-6) {
+      this.motionCameraOffset = cameraOffset;
+      this.updateCamera();
+      this.viewportDirty = true;
+    }
+    if (this.viewportDirty && timestamp >= this.nextViewportNotification) {
+      this.nextViewportNotification = timestamp + 50;
+      this.viewportDirty = false;
+      this.callbacks.onViewportBounds?.(this.avatarViewportBounds());
+    }
     if (this.usesRenderedFootprint() && timestamp >= this.nextFootprintAt) {
       this.nextFootprintAt = timestamp + 250;
       void this.measureRenderedFootprint();
@@ -875,7 +1082,7 @@ export class AvatarRuntime {
   }
 
   private updateNaturalIdle(timestamp: number): void {
-    const available=!this.desktopContactPose?.active && this.settings.naturalIdle && this.bootstrap.character.motionProfile.profileId==='generic-vrm'
+    const available=this.windowRestStage==='off' && !this.desktopContactPose?.active && this.settings.naturalIdle && this.bootstrap.character.motionProfile.profileId==='generic-vrm'
       && !this.diagnosticBindPose && this.animator?.canUseIdleAnimation;
     if(this.motionKind==='natural' && !available){++this.motionSequence;this.motionPlayer?.stop();this.motionKind=null;this.idleResumeAt=timestamp+500;}
     if(!available || !this.naturalIdleBytes || this.naturalIdleFailed || this.naturalIdlePending || this.motionPlaying || timestamp<this.idleResumeAt)return;
@@ -920,7 +1127,7 @@ export class AvatarRuntime {
       this.renderedFootprint = next;
       this.footprintZoom = zoom;
       if (this.started && (previous?.left !== next.left || previous?.right !== next.right
-        || previous?.canvasWidth !== next.canvasWidth)) this.callbacks.onViewportBounds?.(this.avatarViewportBounds());
+        || previous?.canvasWidth !== next.canvasWidth)) this.viewportDirty = true;
     } catch (error) {
       if (!this.disposed) {
         this.footprintFailed = true;

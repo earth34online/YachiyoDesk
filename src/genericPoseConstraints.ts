@@ -3,6 +3,7 @@ import { VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
 import type { MotionProfile, ReactionName } from './types';
 import { ArmContactSurface } from './armContactSurface';
 import { HeadContactSurface } from './headContactSurface';
+import { SeatedHandContact } from './seatedHandContact';
 
 type Pose = Record<string, { rotation?: number[]; position?: number[] }>;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -47,13 +48,18 @@ export class GenericPoseConstraints {
   private readonly footRest = new Map<string, THREE.Quaternion>();
   private readonly armSurface: ArmContactSurface;
   private readonly headSurface: HeadContactSurface;
+  private seatedHandSurface: SeatedHandContact | null = null;
   readonly diagnostics = { calibrated: true, forward: [] as number[], footAnchorError: 0,
     maximumElbowFlexion: 0, handToFaceDistance: 0 };
 
   static create(vrm: VRM, profile: MotionProfile): GenericPoseConstraints | null {
     // The author's Yachiyo poses have a separate contract; keep that path intact.
-    if (profile.profileId !== 'generic-vrm'
-      || !vrm.humanoid.getNormalizedBoneNode || !vrm.humanoid.normalizedHumanBonesRoot) return null;
+    if (profile.profileId !== 'generic-vrm') return null;
+    return this.createContactSolver(vrm);
+  }
+
+  static createContactSolver(vrm: VRM): GenericPoseConstraints | null {
+    if (!vrm.humanoid.getNormalizedBoneNode || !vrm.humanoid.normalizedHumanBonesRoot) return null;
     const required = ['hips', 'head', 'leftUpperLeg', 'leftLowerLeg', 'leftFoot',
       'rightUpperLeg', 'rightLowerLeg', 'rightFoot'];
     if (required.some(name => !vrm.humanoid.getNormalizedBoneNode(name as VRMHumanBoneName))) return null;
@@ -222,6 +228,25 @@ export class GenericPoseConstraints {
       const pole=this.point(this.node(lower)!).sub(this.point(this.node(upper)!)).addScaledVector(this.forward,this.legLength*.12);
       this.solve(pose,upper,lower,hand,target,pole,2.5);
       this.orient(pose,hand,orientation);
+    }
+  }
+
+  constrainSeatedHands(maintainContact: boolean): void {
+    this.seatedHandSurface ??= new SeatedHandContact(this.vrm);
+    this.seatedHandSurface.update();
+    const pose = this.vrm.humanoid.getNormalizedPose() as Pose;
+    for (const side of ['left', 'right'] as const) {
+      const upper = this.node(`${side}UpperArm`), lower = this.node(`${side}LowerArm`), hand = this.node(`${side}Hand`);
+      const hip = this.node(`${side}UpperLeg`), knee = this.node(`${side}LowerLeg`);
+      if (!upper || !lower || !hand || !hip || !knee) continue;
+      // Only resting lap contact. Standing and active raised arms retain their pose.
+      const thigh = this.point(knee).sub(this.point(hip)).normalize();
+      if (Math.abs(thigh.y) > .6) continue;
+      const current = this.point(hand), target = this.seatedHandSurface.resolve(side, current, maintainContact);
+      if (target.distanceToSquared(current) < 1e-10) continue;
+      const orientation = this.orientation(hand), shoulder = this.point(upper), pole = this.point(lower).sub(shoulder);
+      this.solve(pose, `${side}UpperArm`, `${side}LowerArm`, `${side}Hand`, target, pole, 2.5);
+      this.orient(pose, `${side}Hand`, orientation);
     }
   }
 

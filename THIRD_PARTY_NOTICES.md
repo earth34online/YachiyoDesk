@@ -4,6 +4,7 @@ YachiyoDesk uses the following open-source runtime components in its application
 
 - Electron — MIT License
 - Three.js — MIT License
+- three-mesh-bvh 0.9.15 — MIT License, Copyright (c) 2018 Garrett Johnson; accelerated geometry and material-aware contact queries. Full license is included in `electron/THIRD_PARTY_LICENSES.txt`.
 - @pixiv/three-vrm and its bundled VRM modules — MIT License
 - @pixiv/three-vrm-animation 3.5.5 — MIT License; official VRMA loading and retargeting
 - glTF Validator 2.0.0-dev.3.10 — Apache License 2.0, with bundled Dart notices; isolated import validation
@@ -20,6 +21,8 @@ The model is a separate local asset. Its original terms are preserved at `charac
 The PMX integration and runtime lifecycle work draws on [AIRI](https://github.com/moeru-ai/airi), reviewed at commit `b3463466df7a8b32da3a48d11720307cd5459a4b` (MIT License). Relevant implementation references and adaptations are recorded in `docs/AIRI_REVIEW_20261020.md`. Third-party license texts for this integration are included at `electron/THIRD_PARTY_LICENSES.txt` and distributed inside the application archive.
 
 The 2.0 companion and animation work additionally references AIRI commit `c8943f47ca7df375e043461c964ddb2ace3a064e` (MIT). The optional bundled idle animation comes from `packages/stage-ui-three/src/assets/vrm/animations/idle_loop.vrma`; its attribution travels with the asset in `assets/motions/airi-idle.json`. Its hips translation is reanchored to the current character's local rest pose.
+
+The bundled Quaternius animations derive from the author-distributed Universal Animation Library Standard and Universal Animation Library 2 Standard archives downloaded on 2026-11-07. Those specific archives and their original asset pages license the animations under CC0 1.0. Package hashes, source clip names and conversion parameters are included in `assets/motions/quaternius-provenance.json`, with `quaternius-LICENSE.txt`. This does not assert the same license for other or future Quaternius products. Retargeting adapts pixiv/three-vrm's Mixamo example at commit `3caf7a21ee68f0d5dfa363ab3d577450bbf60136` (MIT); its full attribution and license are in `assets/motions/quaternius-retarget-NOTICE.txt`. The conversion script uses the source A_TPose calibration and official VRMA format. No Mixamo animation or VRoid Booth animation pack is redistributed.
 
 The 2026-10-21 seam, constrained skin-gradient, head-surface and missing spring-contact corrections are independently implemented. AIRI reference c8943f47ca7df375e043461c964ddb2ace3a064e was checked for VRM update order, MMD physics prerequisites and interaction hit regions; no additional AIRI implementation or model assets were copied in these corrections. The local verified PMX/model association does not grant redistribution rights to character assets. Desktop Mate was inspected read-only for installation structure and public interaction behavior; no proprietary code, decompiled implementation, animation, or model asset was copied. Current review boundaries are recorded in `docs/REVIEW_20261021.md`.
 
