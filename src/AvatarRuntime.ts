@@ -852,7 +852,7 @@ export class AvatarRuntime {
     if (!this.diagnosticBindPose) this.animator.update(delta);
     this.updateNaturalIdle(timestamp);
     this.motionPlayer?.update(delta);
-    if(this.motionPlayer?.playing) this.animator.constrainExternalPose();
+    if (this.motionPlayer?.playing && this.motionKind !== 'natural') this.animator.constrainExternalPose();
     if (this.desktopContactPose?.active) {
       this.desktopContactPose.update(delta);
       this.animator.constrainExternalPose();

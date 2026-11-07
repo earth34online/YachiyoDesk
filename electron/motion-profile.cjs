@@ -17,8 +17,8 @@ const GENERIC_MOTION_PROFILE = Object.freeze({
     maxSubsteps: 4,
   }),
   handPose: Object.freeze({
-    // Direct VRM imports use their authored wrist basis. PMX-specific
-    // compensation is scoped to PMX_CONVERTED_MOTION_PROFILE below.
+    // Direct VRM uses its authored wrist basis and calibrates arm lift in the
+    // renderer. armAxisSign is the fallback when calibration is unavailable.
     palmFacingSign: 1,
     armAxisSign: 1,
     bodyForwardAxisSign: 1,

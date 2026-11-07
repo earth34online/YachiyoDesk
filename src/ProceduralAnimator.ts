@@ -156,13 +156,23 @@ export class ProceduralAnimator {
   private dragging = false;
   private draggingWeight = 0;
   private originalPmxPhysics = false;
+  private readonly directArmRig: GenericPoseConstraints | null;
+  private readonly leftArmLiftSign: -1 | 1;
+  private readonly rightArmLiftSign: -1 | 1;
+  private readonly leftRestArmAngle: number;
+  private readonly rightRestArmAngle: number;
 
   constructor(vrm: VRM, settings: AppSettings, motionProfile: MotionProfile) {
     this.vrm = vrm;
     this.settings = settings;
     this.motionProfile = motionProfile;
     this.genericConstraints = GenericPoseConstraints.create(vrm, motionProfile);
+    this.directArmRig = motionProfile.capabilities.includes('pmx-converted') ? null : this.genericConstraints;
+    this.leftArmLiftSign = this.directArmRig?.armLiftSign('left') ?? motionProfile.handPose.armAxisSign;
+    this.rightArmLiftSign = this.directArmRig?.armLiftSign('right') ?? motionProfile.handPose.armAxisSign;
     this.skirtRestAngles = this.measureSkirtRestAngles();
+    this.leftRestArmAngle = this.directArmRig?.gravityArmAngle('left') ?? this.genericConstraints?.idleArmAngle('left') ?? this.skirtRestAngles?.left ?? 1.16;
+    this.rightRestArmAngle = this.directArmRig?.gravityArmAngle('right') ?? this.genericConstraints?.idleArmAngle('right') ?? this.skirtRestAngles?.right ?? 1.16;
     this.pose = createReusablePose(motionProfile.capabilities.includes('pmx-converted'));
     this.expressions = new ExpressionController(vrm.expressionManager);
     if (vrm.lookAt) vrm.lookAt.autoUpdate = false;
@@ -323,7 +333,7 @@ export class ProceduralAnimator {
     }
 
     const reactionName = activeReaction?.name ?? null;
-    this.updatePose(this.sleepWeight, reactionName, reactionWeight, reactionElapsed, activeReaction?.duration ?? 1);
+    const [leftPalm, rightPalm] = this.updatePose(this.sleepWeight, reactionName, reactionWeight, reactionElapsed, activeReaction?.duration ?? 1);
     this.applyPoseTransition();
     if(this.genericConstraints)this.jointDynamics.apply(this.pose,delta);
     const progress = reactionElapsed / (activeReaction?.duration ?? 1);
@@ -334,7 +344,11 @@ export class ProceduralAnimator {
       ? smoothstep01(clamp((this.elapsed - this.transitionStartedAt) / this.transitionDuration, 0, 1)) : 1;
     this.genericConstraints?.apply(this.pose, reactionName, constraintWeight * reactionWeight, constraintBlend);
     this.vrm.humanoid.setNormalizedPose(this.pose);
-    this.genericConstraints?.constrainExternalArms(this.skirtRestAngles);
+    if (reactionName || this.walkWeight > .01 || this.draggingWeight > .01) {
+      this.genericConstraints?.constrainExternalArms(this.skirtRestAngles);
+    }
+    this.directArmRig?.facePalmForward(this.pose, 'left', leftPalm);
+    this.directArmRig?.facePalmForward(this.pose, 'right', rightPalm);
 
     if (this.vrm.lookAt) {
       this.vrm.lookAt.yaw = this.lookCurrent.x * 10 * this.settings.lookIntensity;
@@ -406,7 +420,7 @@ export class ProceduralAnimator {
     weight: number,
     reactionElapsed: number,
     reactionDuration: number,
-  ): void {
+  ): [number, number] {
     const idle = this.motionWeight * this.settings.motionIntensity;
     const slowPhase = this.slowPhase;
     const breathPhase = this.breathPhase;
@@ -415,7 +429,6 @@ export class ProceduralAnimator {
     const counterShift = Math.sin(slowPhase * 0.63 + 1.1) * 0.0055 * idle;
     const walkTuning = this.motionProfile.walk;
     const palmSign = this.motionProfile.handPose.palmFacingSign;
-    const armAxisSign = this.motionProfile.handPose.armAxisSign;
     const bodyForwardAxisSign = this.motionProfile.handPose.bodyForwardAxisSign;
     const legForwardAxisSign = this.motionProfile.handPose.legForwardAxisSign;
     const rootDepthAxisSign = this.motionProfile.handPose.rootDepthAxisSign;
@@ -450,10 +463,10 @@ export class ProceduralAnimator {
     let leftArmY = 0.025;
     // Use the final garment-aware rest pose throughout gesture fade-out. A
     // late idle-only override made the arm visit 1.16 first, then jump to rest.
-    let leftArmZ = this.genericConstraints ? this.genericConstraints.idleArmAngle('left') + weightShift*.7 : this.skirtRestAngles?.left ?? (1.16 + weightShift * 0.7);
+    let leftArmZ = this.leftRestArmAngle + weightShift * .7;
     let rightArmX = idleArmPitch;
     let rightArmY = -0.025;
-    let rightArmZ = this.genericConstraints ? -this.genericConstraints.idleArmAngle('right') + weightShift*.7 : this.skirtRestAngles ? -this.skirtRestAngles.right : -1.16 + weightShift * 0.7;
+    let rightArmZ = -this.rightRestArmAngle + weightShift * .7;
     let leftLowerX = -0.14;
     let leftLowerY = 0.045;
     // Keep the relaxed elbow bend on the forward/back axis. Sideways Z bends
@@ -463,12 +476,15 @@ export class ProceduralAnimator {
     let rightLowerX = -0.14;
     let rightLowerY = -0.045;
     let rightLowerZ = 0;
-    let leftHandX = 0.015;
-    let leftHandY = 0.035;
-    let leftHandZ = -0.045;
-    let rightHandX = 0.015;
-    let rightHandY = -0.035;
-    let rightHandZ = 0.045;
+    let leftPalm = 0;
+    let rightPalm = 0;
+    // Keep native wrists in their authored forearm alignment at rest.
+    let leftHandX = this.directArmRig ? 0 : 0.015;
+    let leftHandY = this.directArmRig ? 0 : 0.035;
+    let leftHandZ = this.directArmRig ? 0 : -0.045;
+    let rightHandX = leftHandX;
+    let rightHandY = -leftHandY;
+    let rightHandZ = -leftHandZ;
     let leftFingerCurl = 0.16 * fingerCurlScale;
     let rightFingerCurl = 0.16 * fingerCurlScale;
     let leftUpperLegX = 0;
@@ -629,7 +645,8 @@ export class ProceduralAnimator {
       // its edge, faces the viewer. The approved shoulder/elbow chain stays
       // exactly as tuned above.
       const palm = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, palm.right, weight);
+      rightPalm = weight;
+      if (!this.directArmRig?.hasPalmBasis('right')) rightHandX = THREE.MathUtils.lerp(rightHandX, palm.right, weight);
       rightHandZ += wave * 0.015 * weight;
       // Open the waving hand while retaining a relaxed thumb; a flat rigid
       // hand reads as an animation error on converted PMX rigs.
@@ -651,8 +668,9 @@ export class ProceduralAnimator {
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.24, weight);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.24, weight);
       const palms = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
-      leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, lift);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, lift);
+      leftPalm = rightPalm = lift;
+      if (!this.directArmRig?.hasPalmBasis('left')) leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, lift);
+      if (!this.directArmRig?.hasPalmBasis('right')) rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, lift);
       leftFingerCurl = THREE.MathUtils.lerp(leftFingerCurl, 0.065 * fingerCurlScale, lift);
       rightFingerCurl = THREE.MathUtils.lerp(rightFingerCurl, 0.065 * fingerCurlScale, lift);
       leftKneeX += 0.025 * lift;
@@ -671,8 +689,9 @@ export class ProceduralAnimator {
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.34, weight);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.34, weight);
       const palms = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
-      leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, recoil);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, recoil);
+      leftPalm = rightPalm = recoil;
+      if (!this.directArmRig?.hasPalmBasis('left')) leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, recoil);
+      if (!this.directArmRig?.hasPalmBasis('right')) rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, recoil);
     } else if (reaction === 'angry') {
       const disapproval = Math.sin(reactionElapsed * 3.2) * 0.018 * weight;
       hipsX += 0.011 * weight;
@@ -715,9 +734,10 @@ export class ProceduralAnimator {
     } else if (reaction === 'bow') {
       const bow = windowPulse(progress, 0.05, 0.28, 0.68, 0.96) * weight;
       const hands = smoothstep01(Math.min(1, progress * 3.2)) * weight;
+      const bowDirection = this.directArmRig ? this.directArmRig.bodyPitchSign * bodyForwardAxisSign : 1;
       hipsZ -= 0.018 * bow;
-      torsoX -= 0.34 * bow;
-      headX -= 0.22 * bow;
+      torsoX -= 0.34 * bow * bowDirection;
+      headX -= 0.22 * bow * bowDirection;
       headZ -= 0.018 * bow;
       leftArmX = THREE.MathUtils.lerp(leftArmX, 0.11, hands);
       rightArmX = THREE.MathUtils.lerp(rightArmX, 0.11, hands);
@@ -742,8 +762,9 @@ export class ProceduralAnimator {
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.22, stretch);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.22, stretch);
       const palms = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
-      leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, stretch);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, stretch);
+      leftPalm = rightPalm = stretch;
+      if (!this.directArmRig?.hasPalmBasis('left')) leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, stretch);
+      if (!this.directArmRig?.hasPalmBasis('right')) rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, stretch);
     } else if (reaction === 'dance') {
       const dance = windowPulse(progress, 0.02, 0.11, 0.87, 0.99) * weight;
       const beat = Math.sin(reactionElapsed * Math.PI * 1.7);
@@ -823,8 +844,9 @@ export class ProceduralAnimator {
       // wrists on the same signed roll also leaves each thumb on the inner,
       // face-facing edge of the V pose.
       const palms = viewerFacingPalmTwists(palmSign, FRONT_PALM_TWIST_RADIANS);
-      leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, active);
-      rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, active);
+      leftPalm = rightPalm = active;
+      if (!this.directArmRig?.hasPalmBasis('left')) leftHandX = THREE.MathUtils.lerp(leftHandX, palms.left, active);
+      if (!this.directArmRig?.hasPalmBasis('right')) rightHandX = THREE.MathUtils.lerp(rightHandX, palms.right, active);
       leftFingerCurl = THREE.MathUtils.lerp(leftFingerCurl, 0.055 * fingerCurlScale, active);
       rightFingerCurl = THREE.MathUtils.lerp(rightFingerCurl, 0.055 * fingerCurlScale, active);
       leftKneeX += (0.10 + Math.max(0, -beat) * 0.30) * active;
@@ -874,12 +896,11 @@ export class ProceduralAnimator {
       rightFootY -= 0.035 * active;
       leftArmX = THREE.MathUtils.lerp(leftArmX, -0.055, active);
       rightArmX = THREE.MathUtils.lerp(rightArmX, -0.055, active);
-      // A converted PMX has a T-pose as its zero arm rotation. Near-zero here
-      // would turn a squat into an outstretched-arm pose. Keep its arms down;
-      // direct VRM and the built-in character retain their existing targets.
-      const crouchArmZ = this.motionProfile.capabilities.includes('pmx-converted') ? 1.08 : 0.10;
-      leftArmZ = THREE.MathUtils.lerp(leftArmZ, crouchArmZ, active);
-      rightArmZ = THREE.MathUtils.lerp(rightArmZ, -crouchArmZ, active);
+      const convertedPmx = this.motionProfile.capabilities.includes('pmx-converted');
+      const leftBalance = this.directArmRig ? this.leftRestArmAngle : convertedPmx ? 1.08 : .10;
+      const rightBalance = this.directArmRig ? this.rightRestArmAngle : convertedPmx ? 1.08 : .10;
+      leftArmZ = THREE.MathUtils.lerp(leftArmZ, leftBalance, active);
+      rightArmZ = THREE.MathUtils.lerp(rightArmZ, -rightBalance, active);
       leftLowerZ = THREE.MathUtils.lerp(leftLowerZ, -0.10, active);
       rightLowerZ = THREE.MathUtils.lerp(rightLowerZ, 0.10, active);
       leftFingerCurl = THREE.MathUtils.lerp(leftFingerCurl, 0.08 * fingerCurlScale, active);
@@ -929,13 +950,10 @@ export class ProceduralAnimator {
     this.setRotation('head', headX * 0.68 * bodyForwardAxisSign, headY * 0.66, headZ * 0.70);
     this.setRotation('leftShoulder', leftShoulderX, leftShoulderY, leftShoulderZ);
     this.setRotation('rightShoulder', rightShoulderX, rightShoulderY, rightShoulderZ);
-    // Blender's MMD coordinate convention produces the opposite arm bend axis
-    // after PMX -> VRM1 normalization. The correction lives only in generated
-    // PMX manifests; built-in Yachiyo and direct VRM imports retain +1 exactly.
-    this.setRotation('leftUpperArm', leftArmX, leftArmY, leftArmZ * armAxisSign);
-    this.setRotation('rightUpperArm', rightArmX, rightArmY, rightArmZ * armAxisSign);
-    this.setRotation('leftLowerArm', leftLowerX, leftLowerY, leftLowerZ * armAxisSign * elbowBendScale);
-    this.setRotation('rightLowerArm', rightLowerX, rightLowerY, rightLowerZ * armAxisSign * elbowBendScale);
+    this.setRotation('leftUpperArm', leftArmX, leftArmY, leftArmZ * this.leftArmLiftSign);
+    this.setRotation('rightUpperArm', rightArmX, rightArmY, rightArmZ * this.rightArmLiftSign);
+    this.setRotation('leftLowerArm', leftLowerX, leftLowerY, leftLowerZ * this.leftArmLiftSign * elbowBendScale);
+    this.setRotation('rightLowerArm', rightLowerX, rightLowerY, rightLowerZ * this.rightArmLiftSign * elbowBendScale);
     this.setRotation('leftHand', leftHandX * wristAmplitudeScale, leftHandY * wristAmplitudeScale, leftHandZ * wristAmplitudeScale);
     this.setRotation('rightHand', rightHandX * wristAmplitudeScale, rightHandY * wristAmplitudeScale, rightHandZ * wristAmplitudeScale);
     if (this.motionProfile.capabilities.includes('pmx-converted')) {
@@ -950,6 +968,7 @@ export class ProceduralAnimator {
     this.setRotation('rightFoot', rightFootX * legForwardAxisSign, rightFootY, rightFootZ);
     this.setRotation('leftToes', leftToeX * legForwardAxisSign, leftToeY, leftFootZ * 0.65);
     this.setRotation('rightToes', rightToeX * legForwardAxisSign, rightToeY, rightFootZ * 0.65);
+    return [leftPalm, rightPalm];
   }
 
   private measureSkirtRestAngles(): { left: number; right: number; leftRadius: number; rightRadius: number; frontDepth: number; backDepth: number; gaitScale: number; lateralGaitScale: number; height: number } | null {

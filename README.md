@@ -1,6 +1,8 @@
 # ✦ YachiyoDesk ✦
 
-> 2026-10-23：用户已确认当前运行正常，本版固定为维护基线。运行实现沿用 `1cc9620`，本轮不修改动作、物理或模型；穿模改进等待用户决定是否启动。当前状态见[固定基线记录](docs/BASELINE_20261023.md)。下文较早日期的验证数字与交付过程保留为历史记录。
+> 当前正式下载为 [v2.0.0-beta.2](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.2)，包含便携版、安装版、免费官方模型包和校验文件。
+
+> 已发布的 2026-10-23 版本见[固定基线](docs/BASELINE_20261023.md)。2026-11-06 的原生 VRM 动作修复见[模型对照记录](docs/VRM_MOTION_COMPATIBILITY.md)。
 
 
 <div align="center">

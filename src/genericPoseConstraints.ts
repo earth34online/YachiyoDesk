@@ -37,6 +37,8 @@ export function solveTwoLink(start: THREE.Vector3, target: THREE.Vector3, pole: 
 export class GenericPoseConstraints {
   private readonly rest = new Map<string, THREE.Vector3>();
   private readonly fingerAxes = new Map<string, THREE.Vector3>();
+  private readonly palmNormals = new Map<string, THREE.Vector3>();
+  private readonly palmAxes = new Map<string, THREE.Vector3>();
   private readonly root: THREE.Object3D;
   private readonly forward = new THREE.Vector3();
   private readonly lateral = new THREE.Vector3();
@@ -108,6 +110,10 @@ export class GenericPoseConstraints {
     return -0.06 * this.forward.z;
   }
 
+  get bodyPitchSign(): -1 | 1 {
+    return this.forward.z >= 0 ? -1 : 1;
+  }
+
   idleArmAngle(side: 'left'|'right'): number {
     const shoulder=this.rest.get(`${side}UpperArm`),elbow=this.rest.get(`${side}LowerArm`),wrist=this.rest.get(`${side}Hand`);
     if(!shoulder||!elbow||!wrist)return Math.PI/2;
@@ -117,6 +123,59 @@ export class GenericPoseConstraints {
     // Gravity defines the neutral direction. Leave palm-width clearance for
     // a soft elbow, then solve actual body/clothing contact independently.
     return Math.atan2(length,palm*.5);
+  }
+
+  armLiftSign(side: 'left' | 'right'): -1 | 1 | undefined {
+    const shoulder = this.rest.get(`${side}UpperArm`);
+    const elbow = this.rest.get(`${side}LowerArm`);
+    if (!shoulder || !elbow) return undefined;
+    const lateralSpan = elbow.x - shoulder.x;
+    if (Math.abs(lateralSpan) <= 1e-5) return undefined;
+    // In the normalized rig, rotation about +Z raises a segment pointing
+    // toward +X. The procedural curves use +Z on the left to lower the arm.
+    return (side === 'left' ? lateralSpan : -lateralSpan) > 0 ? -1 : 1;
+  }
+
+  gravityArmAngle(side: 'left' | 'right'): number {
+    const shoulder = this.rest.get(`${side}UpperArm`);
+    const elbow = this.rest.get(`${side}LowerArm`);
+    const wrist = this.rest.get(`${side}Hand`);
+    if (!shoulder || !elbow || !wrist) return Math.PI / 2;
+    const gravityAngle = Math.atan2(Math.abs(elbow.x - shoulder.x), shoulder.y - elbow.y);
+    if (!this.armSurface.available) return gravityAngle;
+    const index = this.rest.get(`${side}IndexProximal`), little = this.rest.get(`${side}LittleProximal`);
+    const radius = index && little ? index.distanceTo(little) * .5 : this.legLength * .025;
+    const sign = Math.sign(elbow.clone().sub(shoulder).dot(this.lateral));
+    if (sign === 0) return gravityAngle;
+    const upperLength = shoulder.distanceTo(elbow), reach = upperLength + elbow.distanceTo(wrist);
+    // Use the smallest outward shoulder angle that clears the standing
+    // silhouette. The elbow and wrist keep their relaxed, authored pose.
+    const clearanceAngle = (distance: number): number => {
+      if (distance < 1e-5) return 0;
+      const hanging = shoulder.clone().addScaledVector(DOWN, distance);
+      const clearance = this.armSurface.clearance(hanging, this.lateral, sign, radius);
+      return Math.asin(Math.min(1, clearance / distance));
+    };
+    return Math.max(0, gravityAngle - Math.max(clearanceAngle(upperLength), clearanceAngle(reach)));
+  }
+
+  hasPalmBasis(side: 'left' | 'right'): boolean {
+    return this.palmNormals.has(side);
+  }
+
+  facePalmForward(pose: Pose, side: 'left' | 'right', weight: number): void {
+    const hand = this.node(`${side}Hand`);
+    const restNormal = this.palmNormals.get(side), restAxis = this.palmAxes.get(side);
+    if (!hand || !restNormal || !restAxis || weight <= 0) return;
+    const orientation = this.orientation(hand);
+    const axis = restAxis.clone().applyQuaternion(orientation);
+    const normal = restNormal.clone().applyQuaternion(orientation);
+    const target = this.forward.clone().addScaledVector(axis, -this.forward.dot(axis));
+    if (target.lengthSq() < 1e-6) return;
+    target.normalize();
+    const angle = Math.atan2(axis.dot(normal.clone().cross(target)), normal.dot(target));
+    orientation.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, angle * weight));
+    this.orient(pose, `${side}Hand`, orientation);
   }
 
   constrainExternalArms(garment: {leftRadius:number;rightRadius:number;frontDepth:number;backDepth:number;height:number} | null): void {
@@ -176,6 +235,18 @@ export class GenericPoseConstraints {
       // from this rig's finger spread, then choose its inward hemisphere.
       if (palm.dot(DOWN) < 0) palm.negate();
       if (palm.lengthSq() < .5) palm.copy(DOWN);
+      const wrist = this.rest.get(`${side}Hand`);
+      const hand = this.node(`${side}Hand`);
+      if (wrist && hand) {
+        const axis = middle.clone().sub(wrist).normalize();
+        const normal = new THREE.Vector3().crossVectors(axis, little.clone().sub(index)).normalize();
+        if (axis.lengthSq() > .5 && normal.lengthSq() > .5) {
+          if (normal.dot(palm) < 0) normal.negate();
+          const inverse = this.orientation(hand).invert();
+          this.palmNormals.set(side, normal.applyQuaternion(inverse));
+          this.palmAxes.set(side, axis.applyQuaternion(inverse));
+        }
+      }
       for (const finger of ['Thumb', 'Index', 'Middle', 'Ring', 'Little']) {
         const parts = finger === 'Thumb' ? ['Metacarpal', 'Proximal', 'Distal'] : ['Proximal', 'Intermediate', 'Distal'];
         let previousDirection: THREE.Vector3 | null = null;
