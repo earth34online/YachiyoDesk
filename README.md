@@ -1,6 +1,6 @@
 # ✦ YachiyoDesk ✦
 
-> 当前正式下载为 [v2.0.0-beta.2](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.2)，包含便携版、安装版、免费官方模型包和校验文件。
+> 当前正式下载为 [v2.0.0-beta.3](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.3)，包含便携版、安装版、免费官方模型包和校验文件。交付核对见[本版记录](docs/DELIVERY_20261108.md)。
 
 > 已发布的 2026-10-23 版本见[固定基线](docs/BASELINE_20261023.md)。2026-11-06 的原生 VRM 动作修复见[模型对照记录](docs/VRM_MOTION_COMPATIBILITY.md)。
 
