@@ -1,6 +1,6 @@
 # 可导入的官方模型
 
-[v2.0.0-beta.3 模型下载包](https://github.com/earth34online/YachiyoDesk/releases/download/v2.0.0-beta.3/YachiyoDesk-2.0.0-beta.3-Models.zip)包含两个免费官方 VRM 文件，解压后在角色库导入并确认预览。
+[v2.0.0-beta.4 模型下载包](https://github.com/earth34online/YachiyoDesk/releases/download/v2.0.0-beta.4/YachiyoDesk-2.0.0-beta.4-Models.zip)包含两个免费官方 VRM 文件，解压后在角色库导入并确认预览。
 
 | 模型 | 作者 | 来源及使用条件 |
 |---|---|---|

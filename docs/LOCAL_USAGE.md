@@ -1,16 +1,16 @@
 # YachiyoDesk 本机使用说明
 
-更新：2026-11-09。当前正式下载与日常交付仍为 **2.0.0-beta.3**；源码正在准备 beta.4 的桌面小道具与窗口躲猫猫。beta.4 最终核对待补，未将源码新增视为日常入口已更新。先前固定标签和发布资产保留。
+更新：2026-11-09。当前正式下载与日常交付为 **2.0.0-beta.4**，新增桌面小道具与窗口躲猫猫。原桌面快捷方式、实际主程序和既有 HKCU Run 已核对指向本版，当前 AvatarSample_B 选择及 autoStart=true 保留；用户最终视觉接受单独记录。beta.3 固定标签与包继续保留。
 
 ## 启动与下载
 
 桌面快捷方式“YachiyoDesk - 八千代”指向：
 
 ```text
-F:\create\YachiyoDesk\release\2.0.0-beta.3\win-unpacked\YachiyoDesk.exe
+F:\create\YachiyoDesk\release\2.0.0-beta.4\win-unpacked\YachiyoDesk.exe
 ```
 
-[GitHub Release](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.3) 提供便携版、安装版、两份免费官方模型和 SHA256SUMS。当前公开安装包保存在 `F:/create/YachiyoDesk-public/release/2.0.0-beta.3/publish`。本机版本保留八千代本地资产，公开程序不携带受限模型。
+[GitHub Release](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.4) 提供便携版、安装版、两份免费官方模型和 SHA256SUMS。当前公开安装包保存在 `F:/create/YachiyoDesk-public/release/2.0.0-beta.4/publish`。本机版本保留八千代本地资产，公开程序不携带受限模型。
 
 更新前退出旧程序，再运行新程序；已有角色、配置与使用者自己的 API 资料保存在用户数据目录，继续沿用。开机启动保持原有启用选择。旧固定标签与必要回退资产保留，不把实验目录当作日常入口。
 
@@ -34,11 +34,11 @@ F:\create\YachiyoDesk\release\2.0.0-beta.3\win-unpacked\YachiyoDesk.exe
 
 开启“桌面接触动作”和“站在窗口边缘”，关闭位置锁定。把人物拖到可见应用窗口顶边上方并松手，落脚后选择“窗口边缘陪伴”。人物坐下休息并跟随窗口移动；停止或播放其他动作先起身。拖动人物解除坐姿，窗口最小化、关闭或顶边被遮挡后重新下落。没有实际支撑时会提示，不能在空气中坐下。
 
-## beta.4 源码中的小道具与躲猫猫
+## 小道具与躲猫猫
 
-运行候选源码时，可在创作室 → 桌面小道具选择“拿杯喝茶”“拿起小礼物”“收起道具”。动作收藏中原有喝饮料与拿取也接入同一物品，总目录仍为 25 项。
+可在创作室 → 桌面小道具选择“拿杯喝茶”“拿起小礼物”“收起道具”。动作收藏中原有喝饮料与拿取也接入同一物品，总目录仍为 25 项。
 
-开启桌面接触与窗口边缘互动、解除位置锁定后，在创作室 → 窗口躲猫猫选择“开始躲猫猫”；角色右键也有“到窗口侧边躲猫猫”和停止入口。人物进入足够大的可见窗口矩形遮挡后，从侧边探出，再回到原位。可随时停止；拖动、打开面板、窗口变化或锁定会中断。找不到合适窗口时明确提示。完整操作与矩形近似范围见[功能说明](PROPS_AND_WINDOW_PEEK.md)。上述新增当前不属于 beta.3 下载包。
+开启桌面接触与窗口边缘互动、解除位置锁定后，在创作室 → 窗口躲猫猫选择“开始躲猫猫”；角色右键也有“到窗口侧边躲猫猫”和停止入口。人物进入足够大的可见窗口矩形遮挡后，从侧边探出，再回到原位。可随时停止；拖动、打开面板、窗口变化或锁定会中断。找不到合适窗口时明确提示。完整操作与矩形近似范围见[功能说明](PROPS_AND_WINDOW_PEEK.md)。上述新增已包含在 beta.4 下载包，原 25 项和窗口坐姿继续保留。
 
 ## 模型与配置
 
@@ -48,4 +48,4 @@ F:\create\YachiyoDesk\release\2.0.0-beta.3\win-unpacked\YachiyoDesk.exe
 
 通过托盘打开实际用户数据目录。共享源码入口为 `F:/create/YachiyoDesk-public`，本地树 `F:/create/YachiyoDesk` 保留私有角色；`npm run sync:local` 和 `sync:check` 维护共享内容。两树的 AGENT.md/AGENTS.md 在本机维护，不提交、不打包。
 
-公开交付见[本版说明](RELEASE_20261107_BETA3.md)。历史运行和修复记录保留，不将旧测试数字或单张图片代替当前验证。
+公开交付见[本版记录](DELIVERY_20261109.md)。历史运行和修复记录保留，不将旧测试数字或单张图片代替当前验证。

@@ -5,9 +5,9 @@
 > 已发布的 2026-10-23 版本见[固定基线](BASELINE_20261023.md)。2026-11-06 的原生 VRM 动作修复见[模型对照记录](VRM_MOTION_COMPATIBILITY.md)。
 
 
-更新日期：2026-11-09。当前公开交付为 **2.0.0-beta.3**，`feat/2.0-companion` 源码准备 beta.4，新增[小道具与窗口躲猫猫](PROPS_AND_WINDOW_PEEK.md)。最终核对待补，尚未将 beta.4 记录为已发布或用户接受；当前下载和日常入口继续以 beta.3 的交付记录为准。旧标签保留，保护本地角色与用户设置。
+更新日期：2026-11-09。当前公开交付为 **2.0.0-beta.4**，新增[小道具与窗口躲猫猫](PROPS_AND_WINDOW_PEEK.md)。程序提交 `c4e7a3770d183da3cdafe1942fbcc0673a70f8a8`、标签及正式 Release 已推送；Release 非草稿、非 prerelease 且为 Latest，四资产 digest 一致且 latest 下载链接均 HTTP 200，日常入口已核对，程序 CI 成功。用户最终视觉接受单独记录；beta.3 固定标签和包保留，保护本地角色与用户设置。
 
-本轮维护要核对 `DesktopProps` 的几何、材质和异步动作所有权清理，`WindowPeek` 的计时器、请求代际和原生区域恢复，以及 `window-surfaces.ps1` 的独立打包资源。Windows 原生 region 使用物理像素，窗口移动保持固定逻辑尺寸；不要以回读尺寸反复缩放。回归原 25 项动作、窗口坐姿和角色物理，确认后再分别记录两树、构建、包、实际入口和正式发布，不能继承 beta.3 的测试数量或包指纹。
+本轮维护要核对 `DesktopProps` 的几何、材质和异步动作所有权清理，`WindowPeek` 的计时器、请求代际和原生区域恢复，以及 `window-surfaces.ps1` 的独立打包资源。Windows 原生 region 使用物理像素，窗口移动保持固定逻辑尺寸；不要以回读尺寸反复缩放。原 25 项动作与窗口坐姿、两份官方模型的新道具和 UI 入口、真实 HWND 与 DPI 已分别核对。最终 47 个源码/构建对应文件和 119 个 Portable/Setup 载荷文件一致，公开/本地 ASAR 均为 `fabf5206341e89e4d43c514148fed321de1ca4845faa77b307b14a7310f547e9`；详见[本版交付记录](DELIVERY_20261109.md)。
 
 ## 两份项目的职责
 
@@ -42,21 +42,21 @@ npm run verify
 
 ## 构建和程序入口
 
-公开版执行 `npm run dist` 生成便携版和安装版。当前 2.0 维护必须显式使用 `--config.directories.output=release/2.0.0-beta.3`，不再将旧 `release\win-unpacked` 作为桌面入口。
+公开版执行 `npm run dist` 生成便携版和安装版。当前 2.0 维护必须显式使用 `--config.directories.output=release/2.0.0-beta.4`，不再将旧 `release\win-unpacked` 作为桌面入口。
 
-2.0 安装产物使用 `node scripts/package.cjs --win portable nsis --config.directories.output=release/2.0.0-beta.3`；两版解包构建使用同一版本目录的 `--win --dir`。2026-10-21 按用户要求统一共享源码、当前构建、桌面快捷方式及实际进程，再在这一基线上继续修复。旧文件删除已获用户授权，但自动审批两次拒绝，不能声称清理完成或换工具绕过。
+2.0 安装产物使用 `node scripts/package.cjs --win portable nsis --config.directories.output=release/2.0.0-beta.4`；两版解包构建使用同一版本目录的 `--win --dir`。2026-10-21 按用户要求统一共享源码、当前构建、桌面快捷方式及实际进程，再在这一基线上继续修复。旧文件删除已获用户授权，但自动审批两次拒绝，不能声称清理完成或换工具绕过。
 
-当前桌面快捷方式使用 `F:\create\YachiyoDesk\release\2.0.0-beta.3\win-unpacked\YachiyoDesk.exe`。公开版的模型过滤规则保留在构建配置中；本机桌面构建包含本地角色资源。
+当前桌面快捷方式使用 `F:\create\YachiyoDesk\release\2.0.0-beta.4\win-unpacked\YachiyoDesk.exe`。公开版的模型过滤规则保留在构建配置中；本机桌面构建包含本地角色资源。
 
 源码同步与程序打包分别执行。每次程序更新后核对包内版本、核心文件及本地模型哈希。
 
 ## 测试和交付证据
 
-维护中的测试统一在 `tests`，通过 `npm test` 运行。当前套件为 56 个文件、409 项，包含既有导入与接触检查、外部动作保持/退出、透明材质接触及窗口坐姿流程。两树分别执行完整 `verify`，同步后核对包、模型和实际进程，最新结果见[beta.3 交付记录](DELIVERY_20261108.md)。42 文件/318 项、51 文件/376 项及原始物理 600.8 秒运行是历史记录，保留原验证范围，不继承为本轮结果。模拟时钟、协议检查或没有 NaN 不等于全部视觉通过。
+维护中的测试统一在 `tests`，通过 `npm test` 运行。当前套件为 59 个文件、423 项，包含既有导入与接触检查、外部动作保持/退出、透明材质接触及窗口坐姿流程。两树分别执行完整 `verify`，同步后核对包、模型和实际进程，最新结果见[beta.4 交付记录](DELIVERY_20261109.md)。42 文件/318 项、51 文件/376 项及原始物理 600.8 秒运行是历史记录，保留原验证范围，不继承为本轮结果。模拟时钟、协议检查或没有 NaN 不等于全部视觉通过。
 
 无模型引导使用 `--onboarding-test`；有模型使用 `--smoke-test`。测试使用隔离配置目录。PMX 动作检查保留真实角色 manifest 和 PMX capability。
 
-2.0 证据保存在 `artifacts/2.0-development-20261020`；历史 1.x 与 1.0.8 证据按原目录保留。2.0 包的 SHA-256 保存到 `release/2.0.0-beta.3/SHA256SUMS.txt`；生成校验文件不代表已经发布 GitHub Release。
+2.0 证据保存在 `artifacts/2.0-development-20261020`；历史 1.x 与 1.0.8 证据按原目录保留。2.0 包的 SHA-256 保存到 `release/2.0.0-beta.4/SHA256SUMS.txt`；生成校验文件不代表已经发布 GitHub Release。
 
 `scripts/check-companion-runtime.cjs` 在隔离配置中验证真实 IPC、HTTP、录音、朗读、动作、快照和导入预览，不使用付费密钥。通过 `YACHIYO_COMPANION_TEST_MODEL` 指定合法本地测试 VRM；`--extended-ui` 实测编排和一分钟提醒，`--pmx-repair` 供具备本机 PMX 测试资源与 Blender 的环境使用。普通 `npm test` 不依赖私有角色模型。
 

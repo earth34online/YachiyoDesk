@@ -1,8 +1,8 @@
 # ✦ YachiyoDesk ✦
 
-> 当前正式下载为 [v2.0.0-beta.3](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.3)，包含便携版、安装版、免费官方模型包和校验文件。交付核对见[本版记录](docs/DELIVERY_20261108.md)。
+> 当前正式下载为 [v2.0.0-beta.4](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.4)，包含便携版、安装版、免费官方模型包和校验文件。交付核对见[本版记录](docs/DELIVERY_20261109.md)。
 
-> 源码正在准备 beta.4：创作室新增桌面小道具与窗口躲猫猫，分别支持拿杯喝茶、拿起礼物再放回，以及从可见窗口侧边探出。原 25 项动作继续保留；操作、许可及状态见[新功能说明](docs/PROPS_AND_WINDOW_PEEK.md)。最终核对待补，当前下载仍为 beta.3。
+> beta.4 新增桌面小道具与窗口躲猫猫：拿杯喝茶、拿起礼物再放回，从可见窗口侧边探出。原 25 项动作继续保留；操作、许可及验证范围见[新功能说明](docs/PROPS_AND_WINDOW_PEEK.md)。beta.3 固定标签和包保留；本版已交付，用户最终视觉接受单独记录。
 
 > 已发布的 2026-10-23 版本见[固定基线](docs/BASELINE_20261023.md)。2026-11-06 的原生 VRM 动作修复见[模型对照记录](docs/VRM_MOTION_COMPATIBILITY.md)。
 
@@ -25,7 +25,7 @@ YachiyoDesk 是一个 Windows 本地桌面伴侣：使用 Electron + Three.js + 
 
 2.0 导入预览保留角色已有物理；缺少碰撞配置时，按可识别的身体表面和通用骨骼补基础接触。可试完整动作与行走，再确认入库；支持使用自己的文字 API 调整受限碰撞参数并重新预览，详见 [陪伴功能](docs/COMPANION_2.0.md)。
 
-当前公开版本为 **2.0.0-beta.3**，已固定通用 VRM 动作基线，并提供两份免费官方模型下载。便携版、安装版、模型包和校验文件见 [GitHub Release](https://github.com/earth34online/YachiyoDesk/releases/latest)。新增使用者自己的 AI 接口、文字与可选语音陪伴、导入修复预览、VRMA 动作收藏和角色创作室。详见 [2.0 使用说明](docs/COMPANION_2.0.md) 与 [开发验收记录](docs/DEVELOPMENT_2.0.md)。历史 [1.x 交付记录](docs/RELEASE_20261020.md) 保留。
+当前公开版本为 **2.0.0-beta.4**，已固定通用 VRM 动作基线，并提供两份免费官方模型下载。便携版、安装版、模型包和校验文件见 [GitHub Release](https://github.com/earth34online/YachiyoDesk/releases/latest)。新增使用者自己的 AI 接口、文字与可选语音陪伴、导入修复预览、VRMA 动作收藏和角色创作室。详见 [2.0 使用说明](docs/COMPANION_2.0.md) 与 [开发验收记录](docs/DEVELOPMENT_2.0.md)。历史 [1.x 交付记录](docs/RELEASE_20261020.md) 保留。
 
 本版提供 25 项内置动作，包括招手、抱臂、舞蹈、点头摇头、抛掷、拿取、喝饮料、推物、交谈、接电话及窗口边缘陪伴。窗口休息会坐下并保持坐姿，跟随窗口移动；新动作先起身，窗口失去支撑则下落。使用入口、动作来源和当前验证状态见[动作与窗口陪伴](docs/MOTIONS_20261107.md)。
 
