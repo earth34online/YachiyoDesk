@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import type { VRM } from '@pixiv/three-vrm';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createVRMAnimationClip, VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation';
+import { preparePropClip, type DesktopPropKind } from './DesktopProps';
 
 export interface MotionPlaybackOptions {
+  prop?: DesktopPropKind;
   /** Keep authored hips Y relative to the animation's calibrated rest rig. */
   preserveHipsHeight?: boolean;
   /** A once-only action keeps applying its last frame until replaced or stopped. */
@@ -46,7 +48,7 @@ export class MotionPlayer {
     const animation = asset.userData.vrmAnimations?.[0];
     if (!animation) throw new Error('动作加载器没有识别出 VRMA 数据。');
     if (animation.humanoidTracks.translation.size && Math.abs(animation.restHipsPosition.y) < 1e-6) throw new Error('动作缺少有效的静止髋部高度，无法安全重定向。');
-    const clip = createVRMAnimationClip(animation, this.vrm);
+    let clip = createVRMAnimationClip(animation, this.vrm);
     if (!Number.isFinite(clip.duration) || clip.duration <= 0 || clip.duration > 600) throw new Error('动作时长需在 0–600 秒之间。');
     // No animated mesh/texture scene is retained; VRMA only supplies bone tracks.
     // AIRI anchors local hips positions before playback. Never bake the avatar
@@ -58,6 +60,7 @@ export class MotionPlayer {
       if (options.preserveHipsHeight) offset.y = 0;
       for(let i=0;i<track.values.length;i+=3){track.values[i]-=offset.x;track.values[i+1]-=offset.y;track.values[i+2]-=offset.z;}
     }
+    if (options.prop) clip = preparePropClip(clip, options.prop);
     this.captureTransition(); this.release(); this.mixer = new THREE.AnimationMixer(this.vrm.scene);
     this.action = this.mixer.clipAction(clip);
     this.action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
@@ -104,6 +107,8 @@ export class MotionPlayer {
   }
   get playing(): boolean { return this.state !== 'stopped'; }
   get duration(): number { return this.action?.getClip().duration ?? 0; }
+  get time(): number { return this.action?.time ?? 0; }
+  get clip(): THREE.AnimationClip | null { return this.action?.getClip() ?? null; }
   get finished(): boolean { return !this.looping && this.state === 'playing' && Boolean(this.action && this.action.time >= this.action.getClip().duration - 1e-6); }
   update(delta: number): void {
     if (!this.mixer || !this.action) return;

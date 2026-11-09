@@ -33,3 +33,9 @@ Glass card, button and input styling adapts [earth34online/blog](https://github.
 桌面接触状态机、Win32/DWM 窗口辅助脚本及骨骼接触叠加由本项目独立实现，没有复制 Desktop Mate 程序或资源，也没有新增复制 AIRI 的代码。Windows 系统 API 由本机提供；既有软件、模型及动作各自许可继续适用。
 
 详见 [桌面接触功能与验收](docs/DESKTOP_CONTACTS_20261021.md)。
+
+## 2026-11-09 小道具与窗口躲猫猫（beta.4 源码准备）
+
+小道具参考 Three.js 官方 [Object3D](https://threejs.org/docs/pages/Object3D.html) 和[手部拾取示例](https://github.com/mrdoob/three.js/blob/master/examples/webxr_vr_handinput_cubes.html)的附着与释放方式，沿用 Three.js MIT 许可。杯、礼物和小桌由本项目基础几何生成；喝饮料和拿取继续使用上述已经记录的 Quaternius CC0 片段，VRMA 与 humanoid 沿用 pixiv/three-vrm MIT 实现。
+
+窗口裁剪使用现有 Electron MIT 运行时的原生 `setShape` 接口和 Windows 系统 API；没有复制 Desktop Mate 代码或资产，没有增加第三方运行库或外部动作包。当前正式下载仍为 beta.3，新增源码的最终核对待补。实现与来源对应见[功能说明](docs/PROPS_AND_WINDOW_PEEK.md)。

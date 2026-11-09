@@ -150,6 +150,7 @@ export interface CharacterImportResult {
 }
 
 export type AppCommand =
+  | 'window-peek' | 'window-peek-error' | 'stop-motion'
   | 'desktop-contact'
   | 'desktop-contact-status'
   | 'play-motion'

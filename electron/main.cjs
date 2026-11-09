@@ -15,6 +15,7 @@ const {
   shell,
   safeStorage,
   desktopCapturer,
+  powerMonitor,
 } = require('electron');
 const { CompanionHost } = require('./companion-host.cjs');
 const fs = require('node:fs');
@@ -31,6 +32,7 @@ const { validateAnatomy, validateFingerFlexion, garmentSurfaceIssues } = require
 const { switchCharacterScale, rememberCharacterScale } = require('./character-scale.cjs');
 const { calculateDragPosition, clampDragPosition, horizontalWindowRange, planGenericWalk } = require('./window-drag.cjs');
 const { DesktopContacts } = require('./desktop-contacts.cjs');
+const { WindowPeek, nativeRegion } = require('./window-peek.cjs');
 const { WindowSurfaces } = require('./window-surfaces.cjs');
 const { PMX_CONVERTED_MOTION_PROFILE, sanitizeMotionProfile } = require('./motion-profile.cjs');
 const { convertPmxToVrm, describePmxConversionFailure, resolvePmxConverter } = require('./pmx-converter.cjs');
@@ -147,12 +149,16 @@ let interactionPanelOpen = false;
 let runtimeIsReady = false;
 let stageSuspended = false;
 let desktopContacts = null;
+let windowPeek = null;
+let peekRequestGeneration = 0;
 let windowSurfaces = null;
 let windowSurfaceTimer = null;
 let windowSurfaceGeneration = 0;
 let resumeDesktopDrop = false;
 
 function stopWindowSurfaces() {
+  ++peekRequestGeneration;
+  windowPeek?.cancel('tracking-stopped');
   ++windowSurfaceGeneration;
   clearTimeout(windowSurfaceTimer); windowSurfaceTimer = null;
   windowSurfaces?.stop(); windowSurfaces = null;
@@ -174,17 +180,32 @@ function reconcileWindowSurfaces() {
     if (generation !== windowSurfaceGeneration) return;
     if (surfaces) {
       desktopContacts?.updateWindows(surfaces);
+      windowPeek?.tracked(surfaces);
       if (firstRead) { firstRead=false; log('INFO','Desktop window contacts ready',{surfaceCount:surfaces.length}); }
     }
     // Tracking is 20 Hz only while standing on a real application; otherwise
     // two lightweight boundary reads per second suffice for a future drop.
-    windowSurfaceTimer = setTimeout(poll,desktopContacts?.support?.id && desktopContacts.support.id !== 'screen' ? 50 : 500);
+    windowSurfaceTimer = setTimeout(poll,windowPeek?.busy() || (desktopContacts?.support?.id && desktopContacts.support.id !== 'screen') ? 50 : 500);
   };
   void poll();
 }
 
 function initializeDesktopContacts() {
   if (desktopContacts || !mainWindow) return;
+  windowPeek = new WindowPeek({
+    bounds: () => mainWindow.getBounds(), viewport: () => avatarViewportBounds, now: () => Date.now(),
+    areas: () => screen.getAllDisplays().map(display => display.workArea || display.bounds),
+    allowed: () => process.platform === 'win32' && runtimeIsReady && !stageSuspended && !windowDrag && !interactionPanelOpen
+      && mainWindow && !mainWindow.isDestroyed() && settingsStore.get().desktopContacts && settingsStore.get().windowContacts && !settingsStore.get().lockPosition,
+    // setPosition internally reuses rounded getBounds sizes on Windows; at
+    // fractional DPI that accumulates a pixel on every move. Keep the same
+    // logical canvas dimensions as the existing drag/walk path instead.
+    move: bounds => { if(mainWindow && !mainWindow.isDestroyed()) mainWindow.setBounds({x:bounds.x,y:bounds.y,width:DEFAULT_WIDTH,height:DEFAULT_HEIGHT},false); },
+    shape: rects => { if(mainWindow && !mainWindow.isDestroyed()) mainWindow.setShape(nativeRegion(rects,screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor)); },
+    command: state => sendCommand('window-peek',state),
+    begin: () => { clearTimeout(boundsSaveTimer); desktopContacts?.cancel(); stopAutonomousMovement(false); clearTimeout(autonomyTimer); autonomyTimer=null; sendCommand('stop-motion'); },
+    end: () => { clearTimeout(boundsSaveTimer); scheduleAutonomy(USER_INACTIVITY_RESUME_MS); },
+  });
   desktopContacts = new DesktopContacts({
     bounds: () => mainWindow.getBounds(), viewport: () => avatarViewportBounds,
     settings: () => settingsStore.get(), now: () => Date.now(),
@@ -209,6 +230,15 @@ function initializeDesktopContacts() {
     supportMoved: () => { stopAutonomousMovement(false); scheduleAutonomy(1000); },
   });
   reconcileWindowSurfaces();
+}
+async function startWindowPeek() {
+  const generation=++peekRequestGeneration;
+  if(!windowSurfaces || !windowPeek)return {ok:false,error:'请先开启桌面接触和窗口边缘互动，并等待角色加载完成。'};
+  if(desktopContacts?.busy())return {ok:false,error:'请先结束当前坐姿或落地动作，再开始躲猫猫。'};
+  const surfaces=await windowSurfaces.read();
+  if(generation!==peekRequestGeneration)return {ok:false,error:'窗口互动已取消。'};
+  windowPeek.tracked(surfaces);
+  try{return windowPeek.start();}catch(error){windowPeek.cancel('unsupported');log('WARN','Native window region unavailable',String(error.message));return {ok:false,error:'当前系统无法启用窗口遮挡。'};}
 }
 let latestClickThrough = false;
 let characterSwitchInProgress = false;
@@ -849,6 +879,8 @@ function applySettings(settings) {
 }
 
 function patchSettings(patch) {
+  ++peekRequestGeneration;
+  windowPeek?.cancel('settings');
   const current = settingsStore.get();
   const withScale = Object.prototype.hasOwnProperty.call(patch, 'zoom') && !Object.prototype.hasOwnProperty.call(patch, 'characterZooms')
     ? { ...patch, characterZooms: rememberCharacterScale(current, patch.zoom) }
@@ -887,6 +919,7 @@ function applyAutoStart(enabled) {
 }
 
 function resetWindowPosition() {
+  windowPeek?.cancel('reset');
   desktopContacts?.cancel();
   if (!mainWindow || mainWindow.isDestroyed()) return null;
   stopAutonomousMovement(false);
@@ -947,6 +980,8 @@ function scheduleAutonomy(delayMs, allowWhilePanelOpen = false) {
 }
 
 function noteUserActivity() {
+  ++peekRequestGeneration;
+  windowPeek?.cancel('activity');
   desktopContacts?.interruptReaction();
   lastUserActivityAt = Date.now();
   clearTimeout(autonomyTimer);
@@ -970,6 +1005,7 @@ function setInteractionPanelOpen(open) {
     return;
   }
   interactionPanelOpen = nextOpen;
+  if(nextOpen){++peekRequestGeneration;windowPeek?.cancel('panel');}
   lastUserActivityAt = Date.now();
   clearTimeout(autonomyTimer);
   autonomyTimer = null;
@@ -978,6 +1014,7 @@ function setInteractionPanelOpen(open) {
 }
 
 function startAutonomousWalk() {
+  if(windowPeek?.busy())return false;
   if (desktopContacts?.busy()) return false;
   if (!runtimeIsReady || stageSuspended || autonomyMove || autonomyMoveTimer || !mainWindow || mainWindow.isDestroyed()) return false;
   const settings = settingsStore.get();
@@ -1191,6 +1228,7 @@ function runAutonomousBehavior() {
 }
 
 function persistWindowBounds() {
+  if(windowPeek?.busy())return;
   if (!mainWindow || mainWindow.isDestroyed() || IS_SMOKE || windowDrag || autonomyMove) return;
   clearTimeout(boundsSaveTimer);
   boundsSaveTimer = setTimeout(() => {
@@ -1207,6 +1245,7 @@ function toggleSetting(key) {
 }
 
 function resetRuntimeState() {
+  windowPeek?.cancel('reload'); windowPeek=null;
   resumeDesktopDrop = false;
   stopWindowSurfaces();
   desktopContacts?.cancel(); desktopContacts = null;
@@ -1308,6 +1347,8 @@ function contextTemplate() {
     { label: `和${activeName}打招呼`, click: () => sendCommand('reaction', 'greet') },
     { label: '切换开心表情', click: () => sendCommand('reaction', 'joy') },
     { label: '切换惊讶表情', click: () => sendCommand('reaction', 'surprised') },
+    { label: '到窗口侧边躲猫猫', click: () => { void startWindowPeek().then(result=>{if(!result.ok)sendCommand('window-peek-error',result.error);}); } },
+    { label: '停止躲猫猫', enabled: Boolean(windowPeek?.busy()), click: () => {++peekRequestGeneration;windowPeek?.cancel('user');} },
     { type: 'separator' },
     { label: '详细设置…', click: () => sendCommand('show-settings') },
     { label: '切换角色', submenu: characterSubmenu() },
@@ -1374,6 +1415,7 @@ function showCompanionWindow() {
 }
 
 function recoverChangedDisplay() {
+  windowPeek?.cancel('display');
   desktopContacts?.cancel();
   reconcileWindowSurfaces();
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -1423,6 +1465,8 @@ function beginWindowDrag(point) {
   const screenX = Number(point?.screenX);
   const screenY = Number(point?.screenY);
   if (!Number.isFinite(screenX) || !Number.isFinite(screenY)) return;
+  ++peekRequestGeneration;
+  windowPeek?.cancel('drag');
   noteUserActivity();
   desktopContacts?.cancel();
   const [windowX, windowY] = mainWindow.getPosition();
@@ -1516,6 +1560,7 @@ async function createWindow() {
   stageSuspended = true;
   protectCompanionWindow(mainWindow, shell, () => Boolean(companionHost && Date.now() < companionHost.microphoneUntil));
   mainWindow.webContents.on('did-start-loading', () => companionHost?.dispose());
+  mainWindow.webContents.on('did-start-loading', () => {++peekRequestGeneration;windowPeek?.cancel('reload');});
   for (const event of ['show', 'hide', 'minimize', 'restore']) mainWindow.on(event, updateStageLifecycle);
   mainWindow.setMenu(null);
   mainWindow.setAlwaysOnTop(settings.alwaysOnTop);
@@ -1524,6 +1569,7 @@ async function createWindow() {
   mainWindow.on('move', persistWindowBounds);
   mainWindow.on('resize', persistWindowBounds);
   mainWindow.on('closed', () => {
+    windowPeek?.cancel('closed');windowPeek=null;
     stopWindowSurfaces(); desktopContacts?.cancel(); desktopContacts=null;
     clearTimeout(windowDragTimer);
     windowDragTimer = null;
@@ -1632,6 +1678,7 @@ function bindIpc() {
   ipcMain.on('autonomy:activity', () => noteUserActivity());
   ipcMain.on('autonomy:panel', (_event, open) => setInteractionPanelOpen(open));
   ipcMain.handle('desktop:window-rest', () => {
+    windowPeek?.cancel('rest');
     lastUserActivityAt = Date.now();
     clearTimeout(autonomyTimer);
     autonomyTimer = null;
@@ -1641,6 +1688,9 @@ function bindIpc() {
     stopAutonomousMovement(false);
     return { ok: true };
   });
+
+  ipcMain.handle('desktop:window-peek', () => startWindowPeek());
+  ipcMain.handle('desktop:window-peek-stop', () => {++peekRequestGeneration;windowPeek?.cancel('user');return {ok:true};});
 
   ipcMain.on('window:context-menu', () => showContextMenu());
   ipcMain.handle('window:reset', () => resetWindowPosition());
@@ -2764,6 +2814,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    for(const event of ['lock-screen','suspend']) powerMonitor.on(event,()=>{++peekRequestGeneration;windowPeek?.cancel(event);});
     app.setAppUserModelId('local.yachiyodesk.app');
     const logDirectory = path.join(app.getPath('userData'), 'logs');
     fs.mkdirSync(logDirectory, { recursive: true });
@@ -2808,6 +2859,7 @@ if (!gotLock) {
 }
 
 app.on('before-quit', () => {
+  windowPeek?.cancel('quit');
   stopWindowSurfaces(); desktopContacts?.cancel();
   companionHost?.dispose();
   isQuitting = true;

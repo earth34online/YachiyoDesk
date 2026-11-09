@@ -2,6 +2,8 @@
 
 > 当前正式下载为 [v2.0.0-beta.3](https://github.com/earth34online/YachiyoDesk/releases/tag/v2.0.0-beta.3)，包含便携版、安装版、免费官方模型包和校验文件。交付核对见[本版记录](docs/DELIVERY_20261108.md)。
 
+> 源码正在准备 beta.4：创作室新增桌面小道具与窗口躲猫猫，分别支持拿杯喝茶、拿起礼物再放回，以及从可见窗口侧边探出。原 25 项动作继续保留；操作、许可及状态见[新功能说明](docs/PROPS_AND_WINDOW_PEEK.md)。最终核对待补，当前下载仍为 beta.3。
+
 > 已发布的 2026-10-23 版本见[固定基线](docs/BASELINE_20261023.md)。2026-11-06 的原生 VRM 动作修复见[模型对照记录](docs/VRM_MOTION_COMPATIBILITY.md)。
 
 

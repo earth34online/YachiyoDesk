@@ -123,6 +123,7 @@ if (initializedRuntime) {
       __desktopPetPlayMotion: (bytes: number[], loop: boolean, options?: import('./MotionPlayer').MotionPlaybackOptions) => runtime.playMotion(new Uint8Array(bytes).buffer, 'Runtime verification', loop, options),
       __desktopPetStopMotion: () => runtime.stopMotion(),
       __desktopPetMotionPlaying: () => runtime.motionPlaying,
+      __desktopPetPropSnapshot: () => runtime.propSnapshot(),
       __desktopPetTriggerReaction: (reaction: ReactionName) => runtime.triggerReaction(reaction),
       __desktopPetContact: (state: import('./DesktopContactPose').DesktopContactState) => runtime.setDesktopContact(state),
       __desktopPetContactSnapshot: () => runtime.desktopContactSnapshot(),
@@ -131,7 +132,13 @@ if (initializedRuntime) {
   }
 
   const removeCommandListener = window.yachiyoDesk.onCommand(({ command, payload }) => {
-    if (command === 'desktop-contact-status') {
+    if (command === 'window-peek-error') {
+      ui.showToast(String(payload));
+    } else if (command === 'stop-motion') {
+      companion.interruptScene(); runtime.stopMotion();
+    } else if (command === 'window-peek' && payload && typeof payload === 'object') {
+      runtime.setWindowPeekState(payload as { phase: string; side: number; progress: number });
+    } else if (command === 'desktop-contact-status') {
       ui.showToast('窗口边缘检测暂不可用，拖放落地和屏幕边缘仍可使用');
     } else if (command === 'desktop-contact' && payload && typeof payload === 'object' && 'phase' in payload) {
       runtime.setDesktopContact(payload as import('./DesktopContactPose').DesktopContactState);

@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('yachiyoDesk', {
   noteUserActivity: () => ipcRenderer.send('autonomy:activity'),
   setInteractionPanelOpen: (open) => ipcRenderer.send('autonomy:panel', Boolean(open)),
   restOnWindow: () => ipcRenderer.invoke('desktop:window-rest'),
+  peekFromWindow: () => ipcRenderer.invoke('desktop:window-peek'),
+  stopWindowPeek: () => ipcRenderer.invoke('desktop:window-peek-stop'),
   showContextMenu: (point) => ipcRenderer.send('window:context-menu', point),
   resetWindow: () => ipcRenderer.invoke('window:reset'),
   openDataFolder: () => ipcRenderer.invoke('app:open-data-folder'),

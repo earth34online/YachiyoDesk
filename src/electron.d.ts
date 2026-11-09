@@ -28,6 +28,8 @@ declare global {
       noteUserActivity(): void;
       setInteractionPanelOpen(open: boolean): void;
       restOnWindow(): Promise<{ ok: boolean; error?: string }>;
+      peekFromWindow(): Promise<{ ok: boolean; error?: string }>;
+      stopWindowPeek(): Promise<{ ok: boolean }>;
       showContextMenu(point?: { x: number; y: number }): void;
       resetWindow(): Promise<{ x: number; y: number; width: number; height: number } | null>;
       openDataFolder(): Promise<string>;

@@ -11,6 +11,7 @@ import { clamp, damp, nextAdaptiveScale, normalizedPointer } from './math';
 import { ProceduralAnimator } from './ProceduralAnimator';
 import { DesktopContactPose, type DesktopContactState } from './DesktopContactPose';
 import type { MotionPlaybackOptions } from './MotionPlayer';
+import { DesktopProps } from './DesktopProps';
 import { shouldCombineSkeletons } from './skin-policy';
 import { repairPmxSkinSeams } from './skinSeams';
 import { repairPmxSkinGradients } from './skinGradients';
@@ -75,6 +76,13 @@ function disposeModelScene(scene: THREE.Object3D): void {
 }
 
 export class AvatarRuntime {
+  private desktopProps: DesktopProps | null = null;
+  private windowPeek: { phase: string; side: number; progress: number } | null = null;
+  propSnapshot(): Record<string, unknown> | null { return this.desktopProps ? { ...this.desktopProps.diagnostics } : null; }
+  setWindowPeekState(state: { phase: string; side: number; progress: number }): void {
+    if (!this.windowPeek && state.phase !== 'idle') { this.stopMotion(); this.animator?.setAutonomousMotion('idle', 1); }
+    this.windowPeek = state.phase === 'idle' ? null : state;
+  }
   private motionPlayer: import('./MotionPlayer').MotionPlayer | null = null;
   private motionSequence = 0;
   private automaticContactReport: AutomaticContactReport | null = null;
@@ -131,6 +139,8 @@ export class AvatarRuntime {
     this.motionKeepsHipsHeight = Boolean(options.preserveHipsHeight);
     await this.motionPlayer.play(bytes, name, loop, options);
     if (sequence !== this.motionSequence || this.vrm !== vrm || this.disposed) return;
+    this.desktopProps?.dispose(); this.desktopProps = null;
+    if (options.prop && this.motionPlayer.clip) this.desktopProps = new DesktopProps(vrm, options.prop, this.motionPlayer.clip);
     this.noteActivity();
   }
   stopMotion(): void {
@@ -139,6 +149,8 @@ export class AvatarRuntime {
     this.stopLayers();
   }
   private stopLayers(immediate = false): void {
+    if (immediate) { this.desktopProps?.dispose(); this.desktopProps = null; }
+    else this.desktopProps?.cancel();
     ++this.motionSequence; this.motionPlayer?.stop(immediate);
     if (immediate || this.motionKind !== 'window') this.motionKind=null;
     this.idleResumeAt=performance.now()+3000;
@@ -808,6 +820,7 @@ export class AvatarRuntime {
   }
 
   dispose(): void {
+    this.desktopProps?.dispose(); this.desktopProps = null;
     this.cancelWindowRest();
     this.naturalIdleBytes=null;
     this.reactionMotions?.clear();
@@ -1032,7 +1045,7 @@ export class AvatarRuntime {
     this.motionPlayer?.update(delta);
     if (!this.motionPlayer?.playing && this.windowRestStage === 'off' && this.motionKind === 'window') this.motionKind = null;
     this.updateWindowRest(delta);
-    this.shadow.visible = this.settings.contactShadow && this.windowRestStage === 'off' && this.motionKind !== 'window';
+    this.shadow.visible = this.settings.contactShadow && !this.windowPeek && this.windowRestStage === 'off' && this.motionKind !== 'window';
     if (this.windowRestStage !== 'off' || (this.motionKind === 'window' && this.motionPlayer?.playing)) {
       this.animator.constrainSeatedHands(this.windowRestStage === 'idle');
     }
@@ -1046,9 +1059,24 @@ export class AvatarRuntime {
       const name = manager?.getExpression('aa') ? 'aa' : manager?.getExpression('a') ? 'a' : null;
       if (name) manager?.setValue(name, this.voiceMouth);
     }
+    if (this.windowPeek) {
+      // A small task-local lean, driven by the window interaction's smooth
+      // progress. No arm, wrist or rest-pose overrides leak into ordinary play.
+      const { phase, side, progress } = this.windowPeek;
+      const weight = phase === 'peek' ? THREE.MathUtils.clamp(progress,0,1) : 0;
+      const chest = this.vrm.humanoid.getNormalizedBoneNode('chest');
+      const head = this.vrm.humanoid.getNormalizedBoneNode('head');
+      chest?.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -side * .16 * weight));
+      head?.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -side*.16*weight, -side*.08*weight)));
+    }
     this.currentRotationY = damp(this.currentRotationY, this.targetRotationY + this.autonomyFacing, 8.5, delta);
     this.avatarPivot.rotation.y = this.currentRotationY;
+    this.desktopProps?.applyTaskPose(this.motionPlayer?.time ?? 0);
     this.updateVrm(delta);
+    if (this.desktopProps) {
+      this.desktopProps.update(this.motionPlayer?.time ?? 0, Boolean(this.motionPlayer?.playing), delta);
+      if (this.desktopProps.finished) { this.desktopProps.dispose(); this.desktopProps=null; }
+    }
     // A seated animation can put the soles below its standing origin. Keep
     // those feet inside the canvas by translating the camera vertically;
     // retain the same zoom and let the contact anchor follow the projection.
@@ -1082,7 +1110,7 @@ export class AvatarRuntime {
   }
 
   private updateNaturalIdle(timestamp: number): void {
-    const available=this.windowRestStage==='off' && !this.desktopContactPose?.active && this.settings.naturalIdle && this.bootstrap.character.motionProfile.profileId==='generic-vrm'
+    const available=!this.windowPeek && this.windowRestStage==='off' && !this.desktopContactPose?.active && this.settings.naturalIdle && this.bootstrap.character.motionProfile.profileId==='generic-vrm'
       && !this.diagnosticBindPose && this.animator?.canUseIdleAnimation;
     if(this.motionKind==='natural' && !available){++this.motionSequence;this.motionPlayer?.stop();this.motionKind=null;this.idleResumeAt=timestamp+500;}
     if(!available || !this.naturalIdleBytes || this.naturalIdleFailed || this.naturalIdlePending || this.motionPlaying || timestamp<this.idleResumeAt)return;

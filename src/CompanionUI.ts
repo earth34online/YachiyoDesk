@@ -80,8 +80,9 @@ export class CompanionUI {
     if(this.naturalToggle)this.naturalToggle.checked=settings.naturalIdle;
     if(this.physicsToggle)this.physicsToggle.checked=settings.physics;
   }
-  interruptScene(): void {++this.sceneGeneration;this.sceneWake?.();this.sceneWake=null;}
-  async playSavedMotion(id: string): Promise<void>{const item=(await call<MotionItem[]>('motions')).find(item=>item.id===id);if(!item)throw new Error('动作已不存在。');return this.playMotion(item);}
+  private motionRequest = 0;
+  interruptScene(): void {++this.motionRequest;++this.sceneGeneration;this.sceneWake?.();this.sceneWake=null;}
+  async playSavedMotion(id: string): Promise<void>{this.interruptScene();const request=this.motionRequest;const item=(await call<MotionItem[]>('motions')).find(item=>item.id===id);if(request!==this.motionRequest||this.disposed)return;if(!item)throw new Error('动作已不存在。');return this.playMotion(item,false,request);}
   private async generateImage(prompt: string): Promise<ImageAttachment>{
     if(this.imageRequestId)throw new Error('已有图像生成任务，请先停止或等待完成。');
     const requestId=this.imageRequestId=crypto.randomUUID();
@@ -372,15 +373,25 @@ export class CompanionUI {
     };
     const random = this.input('随机动作播放列表', '', 'checkbox');
     random.field.addEventListener('change', () => { this.playlist = random.field.checked; if (this.playlist) this.schedulePlaylist(); else clearTimeout(this.playlistTimer); });
-    const motions = this.details('✦ 动作收藏', natural.node, this.row(this.button('导入 VRMA', async () => { if (await call('motion.import')) await refresh(); }), this.button('刷新', refresh), this.button('停止动作', () => {this.playlist=false;random.field.checked=false;clearTimeout(this.playlistTimer);window.yachiyoDesk.noteUserActivity();this.host.runtime.stopMotion();})), loop.node, random.node, motionList);
+    const motions = this.details('✦ 动作收藏', natural.node, this.row(this.button('导入 VRMA', async () => { if (await call('motion.import')) await refresh(); }), this.button('刷新', refresh), this.button('停止动作', () => {this.interruptScene();this.playlist=false;random.field.checked=false;clearTimeout(this.playlistTimer);window.yachiyoDesk.noteUserActivity();this.host.runtime.stopMotion();})), loop.node, random.node, motionList);
     motions.addEventListener('toggle', () => { if (motions.open) void refresh().catch(error => this.report(error)); });
-    this.studio.append(motions, this.observationPanel(), this.snapshotPanel(), this.postcardPanel(), this.scenePanel());
+    this.studio.append(motions, this.details('◒ 桌面小道具',
+      element('p', '拿起杯子喝一口，或从小桌上拿起礼物再放回。道具会随手移动。', 'workspace-hint'),
+      this.row(this.button('拿杯喝茶', () => this.playSavedMotion('builtin-consume')),
+        this.button('拿起小礼物', () => this.playSavedMotion('builtin-pickup-table')),
+        this.button('收起道具', () => { this.interruptScene(); this.host.runtime.stopMotion(); }))),
+      this.observationPanel(), this.snapshotPanel(), this.postcardPanel(), this.scenePanel());
+    this.studio.append(this.details('✦ 窗口躲猫猫',element('p','从真实窗口的侧边探头，再回到原位。开启桌面接触与窗口边缘互动后使用。','workspace-hint'),
+      this.row(this.button('开始躲猫猫',async()=>{this.host.runtime.stopMotion();this.host.closeWorkspace();const result=await window.yachiyoDesk.peekFromWindow();if(!result.ok)throw new Error(result.error);}),
+        this.button('停止并回来',async()=>{await window.yachiyoDesk.stopWindowPeek();this.host.toast('已回到原位');}))));
   }
-  private async playMotion(motion: MotionItem, loop = false): Promise<void> {
-    this.interruptScene();
+  private async playMotion(motion: MotionItem, loop = false, request?: number): Promise<void> {
+    if(request===undefined){this.interruptScene();request=this.motionRequest;}
+    if(request!==this.motionRequest||this.disposed)return;
     window.yachiyoDesk.noteUserActivity();
     if (motion.interaction === 'window-rest') {
         await this.motionConfiguration;
+      if(request!==this.motionRequest||this.disposed)return;
       this.host.closeWorkspace();
       const result = await window.yachiyoDesk.restOnWindow();
       if (!result.ok) throw new Error(result.error);
@@ -388,7 +399,10 @@ export class CompanionUI {
         this.localReaction((motion.action || motion.reaction)!);
     } else {
       const bytes = await call<ArrayBuffer>('motion.load', { id: motion.id });
-      await this.host.runtime.playMotion(bytes, motion.name, loop, { preserveHipsHeight: motion.builtin === true });
+      if(request!==this.motionRequest||this.disposed)return;
+      const prop = motion.id === 'builtin-consume' ? 'cup' : motion.id === 'builtin-pickup-table' ? 'parcel' : undefined;
+      if (prop) this.host.closeWorkspace();
+      await this.host.runtime.playMotion(bytes, motion.name, loop, { preserveHipsHeight: motion.builtin === true, prop });
     }
     this.host.toast(`正在播放：${motion.name}`);
   }
